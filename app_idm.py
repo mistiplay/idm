@@ -5,6 +5,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from streamlit_javascript import st_javascript
 
 # =======================
 # CONFIG + OCULTAR BARRA
@@ -19,7 +20,55 @@ st.markdown("""
 SHEET_URL = st.secrets["general"]["sheet_url"]
 
 # =======================
-# GOOGLE SHEETS
+# LOGIN POR IP (ADMIN)
+# =======================
+def get_public_ip():
+    # El navegador consulta ipify y devuelve la IP pública [web:184][web:186]
+    try:
+        script = """
+        const r = await fetch("https://api.ipify.org?format=json");
+        return await r.json();
+        """
+        result = st_javascript(script)
+        if isinstance(result, dict) and "ip" in result:
+            return result["ip"]
+    except:
+        pass
+    return None
+
+def is_admin_ip(ip: str) -> bool:
+    admin_ips_str = st.secrets["general"]["admin_ips"]
+    admin_ips = [x.strip() for x in admin_ips_str.split(",") if x.strip()]
+    return ip in admin_ips
+
+if "admin_ok" not in st.session_state:
+    st.session_state.admin_ok = False
+if "user_ip" not in st.session_state:
+    st.session_state.user_ip = None
+
+if not st.session_state.admin_ok:
+    if st.session_state.user_ip is None:
+        st.session_state.user_ip = get_public_ip()
+        st.rerun()
+
+    if st.session_state.user_ip is None:
+        st.warning("Detectando IP... recarga en unos segundos.")
+        st.stop()
+
+    if not is_admin_ip(st.session_state.user_ip):
+        st.error(f"❌ IP no autorizada: {st.session_state.user_ip}")
+        st.stop()
+
+    st.session_state.admin_ok = True
+    st.rerun()
+
+st.markdown(
+    f"<div style='text-align:center; color:#00C6FF; font-weight:700;'>🔐 ADMIN MODE - IP: {st.session_state.user_ip}</div>",
+    unsafe_allow_html=True
+)
+
+# =======================
+# GOOGLE SHEETS (CON CACHE)
 # =======================
 @st.cache_resource
 def gs_client():
@@ -42,38 +91,56 @@ def safe_strip_columns(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = pd.Index([str(c).strip() for c in df.columns])
     return df
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=300)
 def read_worksheet_as_df(title: str) -> pd.DataFrame:
     ws = open_ws(title)
-
-    # Lee TODO (incluye encabezados aunque no haya datos)
-    values = ws.get_all_values()  # [web:176]
+    values = ws.get_all_values()
     if not values:
         return pd.DataFrame()
-
     headers = [h.strip() for h in values[0]]
     rows = values[1:]
-
     df = pd.DataFrame(rows, columns=headers)
-    df = safe_strip_columns(df)
-    return df
+    return safe_strip_columns(df)
 
 # =======================
-# REGLAS
+# PARSEO FECHA EN ESPAÑOL
 # =======================
+MESES = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+    "julio": 7, "agosto": 8, "septiembre": 9, "setiembre": 9, "octubre": 10,
+    "noviembre": 11, "diciembre": 12
+}
+
+def parse_fecha_es(x):
+    # Acepta "30 de mayo de 2025" o "30/05/2025"
+    if x in (None, "", "N/A"):
+        return None
+    s = str(x).strip().lower()
+
+    # Formato 30/05/2025
+    try:
+        if "/" in s:
+            return pd.to_datetime(s, dayfirst=True).date()
+    except:
+        pass
+
+    # Formato "30 de mayo de 2025"
+    m = re.match(r"(\d{1,2})\s+de\s+([a-záéíóúñ]+)\s+de\s+(\d{4})", s)
+    if not m:
+        return None
+    dd = int(m.group(1))
+    mes_txt = m.group(2).replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
+    mm = MESES.get(mes_txt)
+    yy = int(m.group(3))
+    if not mm:
+        return None
+    return date(yy, mm, dd)
+
 def parse_meses(s) -> int:
     if not s:
         return 0
     m = re.search(r"(\d+)", str(s))
     return int(m.group(1)) if m else 0
-
-def to_date(x):
-    if x in (None, "", "N/A"):
-        return None
-    try:
-        return pd.to_datetime(x, dayfirst=True).date()
-    except:
-        return None
 
 def estado_por_dias(d):
     if d is None:
@@ -85,53 +152,45 @@ def estado_por_dias(d):
     return "Activo"
 
 # =======================
-# APP
+# APP: CUENTAS
 # =======================
 st.markdown("<h2 style='text-align:center; color:#00C6FF;'>📺 CUENTAS</h2>", unsafe_allow_html=True)
 
-try:
-    df = read_worksheet_as_df("Cuentas")
-    df_plat = read_worksheet_as_df("Buscarv")
-except Exception as e:
-    st.error("Error cargando Google Sheets. Revisa el nombre de las pestañas: Cuentas y Buscarv.")
-    st.exception(e)
-    st.stop()
+df = read_worksheet_as_df("Cuentas")
+df_plat = read_worksheet_as_df("Buscarv")
 
 with st.expander("Ver columnas detectadas (diagnóstico)"):
     st.write("Columnas en Cuentas:", df.columns.tolist())
     st.write("Columnas en Buscarv:", df_plat.columns.tolist())
 
-# Si sigue vacía, es porque no hay encabezados en fila 1 o la pestaña está en blanco
 if df.empty:
-    st.warning("La hoja 'Cuentas' está vacía. Agrega encabezados en la fila 1 y al menos una fila de datos.")
+    st.warning("La hoja 'Cuentas' está vacía.")
     st.stop()
 
-# Validar columnas necesarias
-required_cuentas = ["Plataforma", "Suscripcion", "Fecha del pedido"]
-required_buscarv = ["Plataforma", "logo_url", "max_perfiles"]
+# Validar columnas mínimas
+for col in ["Plataforma", "Suscripcion", "Fecha del pedido"]:
+    if col not in df.columns:
+        st.error(f"En 'Cuentas' falta la columna: {col}")
+        st.stop()
 
-missing_cuentas = [c for c in required_cuentas if c not in df.columns]
-missing_buscarv = [c for c in required_buscarv if c not in df_plat.columns]
+for col in ["Plataforma", "logo_url", "max_perfiles"]:
+    if col not in df_plat.columns:
+        st.error(f"En 'Buscarv' falta la columna: {col}")
+        st.stop()
 
-if missing_cuentas:
-    st.error(f"En 'Cuentas' faltan estas columnas: {missing_cuentas}")
-    st.stop()
+# Merge (traer logo y max perfiles)
+df = df.merge(df_plat[["Plataforma", "logo_url", "max_perfiles"]], on="Plataforma", how="left")
 
-if missing_buscarv:
-    st.error(f"En 'Buscarv' faltan estas columnas: {missing_buscarv}")
-    st.stop()
+# Convertir números / defaults
+if "Perfiles Activos" not in df.columns:
+    df["Perfiles Activos"] = 0
+df["Perfiles Activos"] = pd.to_numeric(df["Perfiles Activos"], errors="coerce").fillna(0).astype(int)
+df["max_perfiles"] = pd.to_numeric(df["max_perfiles"], errors="coerce")
 
-# Merge para traer logo y perfiles máximos
-df = df.merge(
-    df_plat[["Plataforma", "logo_url", "max_perfiles"]],
-    on="Plataforma",
-    how="left"
-)
-
-# Calcular fechas/días/estado
+# Calcular fechas/días/estado en la APP
 hoy = date.today()
 df["meses_num"] = df["Suscripcion"].apply(parse_meses)
-df["Fecha del pedido_dt"] = df["Fecha del pedido"].apply(to_date)
+df["Fecha del pedido_dt"] = df["Fecha del pedido"].apply(parse_fecha_es)
 
 df["Fecha de fin"] = df.apply(
     lambda r: (r["Fecha del pedido_dt"] + timedelta(days=int(r["meses_num"]) * 30))
@@ -141,13 +200,6 @@ df["Fecha de fin"] = df.apply(
 
 df["Dias"] = df["Fecha de fin"].apply(lambda d: (d - hoy).days if d else None)
 df["Estado"] = df["Dias"].apply(estado_por_dias)
-
-# Perfiles
-if "Perfiles Activos" not in df.columns:
-    df["Perfiles Activos"] = 0
-
-df["Perfiles Activos"] = pd.to_numeric(df["Perfiles Activos"], errors="coerce").fillna(0).astype(int)
-df["max_perfiles"] = pd.to_numeric(df["max_perfiles"], errors="coerce")
 df["Perfiles Disponibles"] = (df["max_perfiles"] - df["Perfiles Activos"]).clip(lower=0)
 
 # Mostrar
