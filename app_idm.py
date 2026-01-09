@@ -213,19 +213,31 @@ def col_to_letter(n: int) -> str:
         letters = chr(65 + r) + letters
     return letters
 
-def update_row_in_sheet(ws_title: str, sheet_row: int, headers: list[str], values: list):
+def update_partial_row(ws_title: str, sheet_row: int, col_indices: list[int], values: list):
+    """
+    col_indices: índices (0-based) sobre la fila de datos (sin _sheet_row),
+                 es decir, 0 = primera columna visible en Sheets.
+    """
     ws = open_ws(ws_title)
-    # calcular rango exacto según cantidad de columnas a actualizar
-    start_col = 1  # columna A
-    end_col = start_col + len(headers) - 1
-    start_letter = col_to_letter(start_col)
-    end_letter = col_to_letter(end_col)
+    if not col_indices:
+        return
+    # convertir índices a letras A,B,C...
+    start_idx = min(col_indices)
+    end_idx = max(col_indices)
+    start_letter = col_to_letter(start_idx + 1)   # +1 porque A = 1
+    end_letter = col_to_letter(end_idx + 1)
     range_a1 = f"{start_letter}{sheet_row}:{end_letter}{sheet_row}"
-    ws.update(range_a1, [values])
 
+    # construir lista con huecos donde no se actualiza
+    row_values = []
+    v_map = {i: v for i, v in zip(col_indices, values)}
+    for i in range(start_idx, end_idx + 1):
+        row_values.append(v_map.get(i, ""))
+
+    ws.update(range_a1, [row_values])
 
 # =========================
-# 6) CUENTAS: CONFIG + MODAL
+# 6) CONFIG CAMPOS CUENTAS
 # =========================
 PROTECTED_CUENTAS = {
     "Logo", "Estado", "Dias", "Perfiles Activos",
@@ -236,7 +248,7 @@ NUMBER_COLUMNS_CUENTAS = {"Costo"}
 DATE_COLUMNS_CUENTAS = {"Fecha del pedido"}
 
 @st.dialog("Editar cuenta", width="large")
-def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
+def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
     headers = list(row_data.keys())
     st.write(f"Fila en Google Sheets: **{sheet_row}**")
 
@@ -245,21 +257,17 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
     for h in headers:
         val = row_data.get(h, "")
 
-        # SOLO LECTURA
         if h in PROTECTED_CUENTAS:
             st.text_input(h, value=str(val), disabled=True)
             continue
 
-        # FECHA (maneja '30/5/2025' y '30 de mayo de 2025')
         if h in DATE_COLUMNS_CUENTAS:
             s = str(val).strip()
             parsed = None
             if s:
-                # 1) intentar dd/mm/yyyy (30/5/2025)
                 try:
                     parsed = pd.to_datetime(s, dayfirst=True, errors="raise").date()
                 except Exception:
-                    # 2) intentar formato español '30 de mayo de 2025'
                     try:
                         meses = {
                             "enero": "01","febrero": "02","marzo": "03","abril": "04",
@@ -269,7 +277,6 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
                         }
                         s_low = s.lower()
                         partes = s_low.replace(" de ", " ").split()
-                        # esperado: ['30','mayo','2025']
                         if len(partes) == 3 and partes[1] in meses:
                             dia = partes[0]
                             mes = meses[partes[1]]
@@ -278,12 +285,10 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
                             parsed = pd.to_datetime(s_norm, dayfirst=True, errors="raise").date()
                     except Exception:
                         parsed = None
-
             new_date = st.date_input(h, value=parsed, key=f"date_{h}_{sheet_row}")
             new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
             continue
 
-        # COSTO (numero, limpiando S/.)
         if h in NUMBER_COLUMNS_CUENTAS:
             s = str(val).strip()
             for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/"]:
@@ -297,9 +302,8 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
             new_vals[h] = new_num
             continue
 
-        # LISTAS
         if h in LIST_COLUMNS_CUENTAS:
-            opciones = sorted({x for x in df[h].unique() if str(x).strip()})
+            opciones = sorted({x for x in df_noidx[h].unique() if str(x).strip()})
             if val and val not in opciones:
                 opciones.append(val)
             default_idx = opciones.index(val) if val in opciones and opciones else 0
@@ -307,29 +311,27 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
             new_vals[h] = new_sel
             continue
 
-        # TEXTO
         new_text = st.text_input(h, value=str(val), key=f"txt_{h}_{sheet_row}")
         new_vals[h] = new_text
 
     if st.button("💾 Guardar cambios", use_container_width=True, key=f"save_{sheet_row}"):
-        # Construir fila a enviar: SOLO columnas NO protegidas
-        headers = []
+        df_cols = [c for c in df_noidx.columns]  # sin _sheet_row
+        col_indices = []
         values = []
-        for h in df.columns:
-            if h == "_sheet_row":
-                continue
-            if h in PROTECTED_CUENTAS:
-                # No enviar nada: dejar que la fórmula del Sheet siga intacta
-                continue
-            headers.append(h)
-            values.append(new_vals.get(h, row_data.get(h, "")))
 
-        update_row_in_sheet("Cuentas", sheet_row, headers, values)
+        for h in df_cols:
+            if h in PROTECTED_CUENTAS:
+                continue
+            if h in new_vals:
+                idx = df_cols.index(h)
+                col_indices.append(idx)
+                values.append(new_vals[h])
+
+        update_partial_row("Cuentas", sheet_row, col_indices, values)
         st.success("✅ Guardado en Google Sheets.")
         st.cache_data.clear()
         time.sleep(1)
         st.rerun()
-
 
 # =========================
 # 7) PANTALLA CUENTAS
@@ -342,21 +344,20 @@ def pantalla_cuentas():
 
     st.subheader("📄 Cuentas")
 
-    # copiar y crear índice visible desde 1
-    df_view = df.drop(columns=["_sheet_row"]).copy()
+    df_noidx = df.drop(columns=["_sheet_row"]).copy()
+    df_view = df_noidx.copy()
     df_view.insert(0, "#", range(1, len(df_view) + 1))
 
     st.data_editor(df_view, use_container_width=True, disabled=True)
 
-    # filas visibles desde 1 (coinciden con columna "#")
     opciones = [
         f"{i+1} · {r.get('Plataforma','')} · {r.get('Correo','')}"
-        for i, (_, r) in enumerate(df.iterrows())
+        for i, (_, r) in enumerate(df_noidx.iterrows())
     ]
     mapa_idx = {opt: i for i, opt in enumerate(opciones)}
 
     st.markdown("#### ✏️ Editar fila")
-    col_sel, col_btn = st.columns([3, 1])
+    col_sel, col_btn, col_ref = st.columns([3, 1, 1])
 
     with col_sel:
         seleccion = st.selectbox(
@@ -372,8 +373,12 @@ def pantalla_cuentas():
             row = df.iloc[idx]
             sheet_row = int(row["_sheet_row"])
             row_data = row.drop(labels=["_sheet_row"]).to_dict()
-            dialog_editar_cuenta(sheet_row, row_data, df)
+            dialog_editar_cuenta(sheet_row, row_data, df_noidx)
 
+    with col_ref:
+        if st.button("🔄 Refrescar tabla", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
 
 # =========================
 # 8) TABS
