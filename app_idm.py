@@ -3,9 +3,17 @@ from datetime import date
 import streamlit as st
 import pandas as pd
 import gspread
-from gspread.utils import ValueRenderOption, DateTimeOption
 from oauth2client.service_account import ServiceAccountCredentials
 from streamlit_javascript import st_javascript
+
+# gspread enums (con fallback por si tu versión no los trae)
+try:
+    from gspread.utils import ValueRenderOption, DateTimeOption
+    VRO_UNFORMATTED = ValueRenderOption.unformatted
+    DTO_SERIAL = DateTimeOption.serial_number
+except Exception:
+    VRO_UNFORMATTED = "UNFORMATTED_VALUE"
+    DTO_SERIAL = "SERIAL_NUMBER"
 
 
 # =========================
@@ -205,10 +213,10 @@ def safe_strip_columns(df: pd.DataFrame) -> pd.DataFrame:
 def read_ws_df(title: str) -> pd.DataFrame:
     ws = open_ws(title)
 
-    # Lee valores SIN formato (fechas como número de Google Sheets)
+    # IMPORTANTE: sin formato + serial_number para fechas
     values = ws.get_all_values(
-        value_render_option=ValueRenderOption.unformatted,
-        date_time_render_option=DateTimeOption.serial_number,
+        value_render_option=VRO_UNFORMATTED,
+        date_time_render_option=DTO_SERIAL,
     )
 
     if not values:
@@ -221,26 +229,22 @@ def read_ws_df(title: str) -> pd.DataFrame:
     df.insert(0, "_sheet_row", range(2, 2 + len(df)))
     return df
 
-
 def parse_date_cell(val):
-    # Vacío -> sin fecha
     if val is None or str(val).strip() == "":
         return None
 
-    # Caso 1: viene como número (serial de Google Sheets)
+    # Si viene serial de Sheets (número)
     try:
         n = float(val)
         return pd.to_datetime(n, unit="D", origin="1899-12-30").date()
     except Exception:
         pass
 
-    # Caso 2: viene como texto (por si alguna celda es texto)
+    # Si viene texto
     dt = pd.to_datetime(str(val).strip(), dayfirst=True, errors="coerce")
     if pd.isna(dt):
         return None
     return dt.date()
-
-
 
 def col_to_letter(n: int) -> str:
     letters = ""
@@ -259,10 +263,6 @@ def update_single_cells(ws_title: str, sheet_row: int, col_indices: list[int], v
         ws.update(a1, [[val]])
 
 def append_row_only_fields(ws_title: str, valores_dict: dict):
-    """
-    Crea una fila vacía al final y escribe SOLO las columnas del dict.
-    No toca columnas con fórmulas.
-    """
     ws = open_ws(ws_title)
     ws.append_row([], value_input_option="USER_ENTERED")
     data = ws.get_all_values()
@@ -367,6 +367,7 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
         df_cols = [c for c in df_noidx.columns]
         col_indices = []
         values = []
+
         for colname in df_cols:
             if colname in PROTECTED_CUENTAS:
                 continue
@@ -382,15 +383,13 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
         st.rerun()
 
 
-
 # =========================
-# 7) EDITAR: DATOS (con Plataforma/Proveedor/Correo desde CUENTAS)
+# 7) EDITAR: DATOS
 # =========================
 @st.dialog("Editar dato", width="large")
 def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
     st.write(f"Fila en Google Sheets (Datos): **{sheet_row}**")
 
-    # NO mostrar en el dialog
     skip_cols = {"Logo", "LogoURL", "RCliente"}
 
     protected = {
@@ -406,12 +405,12 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
         "Combo",
         "Pago",
         "Activación",
-        # Plataforma/Proveedor/Correo se manejan aparte (dependientes)
     }
+
     number_columns = {"Costo"}
     date_columns = {"Fecha del pedido"}
 
-    # ---- Fuente: CUENTAS para Plataforma/Proveedor/Correo ----
+    # --- Selectores dependientes desde CUENTAS ---
     df_cuentas = read_ws_df("Cuentas")
     df_c = df_cuentas.drop(columns=["_sheet_row"], errors="ignore").copy()
     df_c = safe_strip_columns(df_c)
@@ -435,7 +434,6 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
             key=f"edit_datos_plataforma_{sheet_row}",
         )
 
-    # Proveedor: se filtra por plataforma seleccionada (más fácil de usar)
     proveedores_ops = []
     if not df_c.empty and all(c in df_c.columns for c in ["Plataforma", "Proveedor"]):
         proveedores_ops = uniq_nonempty(df_c.loc[df_c["Plataforma"] == plataforma_new, "Proveedor"])
@@ -456,7 +454,6 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
         mask = (df_c["Plataforma"] == plataforma_new) & (df_c["Proveedor"] == proveedor_new)
         correos_ops = uniq_nonempty(df_c.loc[mask, "Correo"])
 
-    # Mantener correo actual aunque no esté en las opciones
     if correo_actual and correo_actual not in correos_ops:
         correos_ops.append(correo_actual)
 
@@ -476,7 +473,6 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
                 key=f"edit_datos_correo_txt_{sheet_row}",
             )
 
-    # Guardar estos 3 valores sí o sí
     new_vals = {
         "Plataforma": plataforma_new,
         "Proveedor": proveedor_new,
@@ -485,70 +481,68 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
 
     st.markdown("---")
 
-    # ---- Resto de campos ----
     headers = list(row_data.keys())
-for h in headers:
-    if h in skip_cols:
-        continue
-    if h in {"Plataforma", "Proveedor", "Correo"}:
-        continue
+    for h in headers:
+        if h in skip_cols:
+            continue
+        if h in {"Plataforma", "Proveedor", "Correo"}:
+            continue
 
-    val = row_data.get(h, "")
+        val = row_data.get(h, "")
 
-    if h in protected:
-        st.text_input(h, value=str(val), disabled=True)
-        continue
+        if h in protected:
+            st.text_input(h, value=str(val), disabled=True)
+            continue
 
-    if h in date_columns:
-        parsed = parse_date_cell(val)
-        new_date = st.date_input(
-            h,
-            value=parsed,
-            format="DD/MM/YYYY",
-            key=f"date_datos_{h}_{sheet_row}",
-        )
-        new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
-        continue
+        if h in date_columns:
+            parsed = parse_date_cell(val)
+            new_date = st.date_input(
+                h,
+                value=parsed,
+                format="DD/MM/YYYY",
+                key=f"date_datos_{h}_{sheet_row}",
+            )
+            new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
+            continue
 
-    if h in number_columns:
-        s = str(val).strip()
-        for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/"]:
-            s = s.replace(ch, "")
-        s = s.replace(" ", "").replace(",", ".")
-        try:
-            num_val = float(s) if s else 0.0
-        except Exception:
-            num_val = 0.0
-        new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_datos_{h}_{sheet_row}")
-        new_vals[h] = new_num
-        continue
+        if h in number_columns:
+            s = str(val).strip()
+            for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/"]:
+                s = s.replace(ch, "")
+            s = s.replace(" ", "").replace(",", ".")
+            try:
+                num_val = float(s) if s else 0.0
+            except Exception:
+                num_val = 0.0
+            new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_datos_{h}_{sheet_row}")
+            new_vals[h] = new_num
+            continue
 
-    if h in list_columns and h in df_noidx.columns:
-        opciones = sorted({x for x in df_noidx[h].unique() if str(x).strip()})
-        if val and val not in opciones:
-            opciones.append(val)
-        default_idx = opciones.index(val) if val in opciones and opciones else 0
-        new_sel = st.selectbox(h, opciones, index=default_idx, key=f"sel_datos_{h}_{sheet_row}")
-        new_vals[h] = new_sel
-        continue
+        if h in list_columns and h in df_noidx.columns:
+            opciones = sorted({x for x in df_noidx[h].unique() if str(x).strip()})
+            if val and val not in opciones:
+                opciones.append(val)
+            default_idx = opciones.index(val) if val in opciones and opciones else 0
+            new_sel = st.selectbox(h, opciones, index=default_idx, key=f"sel_datos_{h}_{sheet_row}")
+            new_vals[h] = new_sel
+            continue
 
-    new_text = st.text_input(h, value=str(val), key=f"txt_datos_{h}_{sheet_row}")
-    new_vals[h] = new_text
-
+        new_text = st.text_input(h, value=str(val), key=f"txt_datos_{h}_{sheet_row}")
+        new_vals[h] = new_text
 
     if st.button("💾 Guardar cambios (Datos)", use_container_width=True, key=f"save_datos_{sheet_row}"):
         df_cols = [c for c in df_noidx.columns]
         col_indices, values = [], []
 
-        for h in df_cols:
-            if h in skip_cols:
+        for colname in df_cols:
+            if colname in skip_cols:
                 continue
-            if h in protected:
+            if colname in protected:
                 continue
-            if h in new_vals:
-                idx = df_cols.index(h)
+            if colname in new_vals:
+                idx = df_cols.index(colname)
                 col_indices.append(idx)
-                values.append(new_vals[h])
+                values.append(new_vals[colname])
 
         update_single_cells("Datos", sheet_row, col_indices, values)
         st.success("✅ Cambios guardados en 'Datos'.")
@@ -583,7 +577,6 @@ def pantalla_cuentas():
 
     df_noidx = df.drop(columns=["_sheet_row"]).copy()
 
-    # ---------- FORMULARIO NUEVO INGRESO ----------
     st.markdown("### ➕ Nuevo ingreso")
 
     with st.form("form_nuevo_ingreso"):
@@ -602,7 +595,7 @@ def pantalla_cuentas():
             correo_new = st.text_input("Correo")
 
         with col3:
-            fecha_pedido_new = st.date_input("Fecha del pedido", value=date.today())
+            fecha_pedido_new = st.date_input("Fecha del pedido", value=date.today(), format="DD/MM/YYYY")
             costo_new = st.number_input("Costo", min_value=0.0, step=1.0)
 
         submitted = st.form_submit_button("💾 Guardar nuevo ingreso")
@@ -623,7 +616,6 @@ def pantalla_cuentas():
 
     st.markdown("---")
 
-    # ---------- TABLA PRINCIPAL ----------
     desired_cols = [
         "Plataforma",
         "LogoURL",
@@ -649,7 +641,6 @@ def pantalla_cuentas():
         column_config={"LogoURL": st.column_config.ImageColumn("Logo", width="small")},
     )
 
-    # ---------- EDITAR FILA ----------
     st.markdown("#### ✏️ Editar fila")
 
     opciones = [
@@ -674,7 +665,6 @@ def pantalla_cuentas():
             row_data = row.drop(labels=["_sheet_row"]).to_dict()
             dialog_editar_cuenta(sheet_row, row_data, df_noidx)
 
-    # ---------- ELIMINAR INGRESO ----------
     st.markdown("---")
     st.markdown("### 🗑️ Eliminar ingreso")
 
@@ -682,10 +672,7 @@ def pantalla_cuentas():
         f"{int(r['_sheet_row'])} · {r.get('Plataforma','')} · {r.get('Correo','')}"
         for _, r in df.iterrows()
     ]
-    mapa_row_del = {
-        opt: int(r["_sheet_row"])
-        for opt, (_, r) in zip(opciones_del, df.iterrows())
-    }
+    mapa_row_del = {opt: int(r["_sheet_row"]) for opt, (_, r) in zip(opciones_del, df.iterrows())}
 
     col_sel_del, col_btn_del = st.columns([3, 1])
     with col_sel_del:
@@ -730,7 +717,6 @@ def pantalla_datos():
 
     df_noidx = df.drop(columns=["_sheet_row"]).copy()
 
-    # ---------- NUEVO DATO (Plataforma/Proveedor/Correo desde CUENTAS) ----------
     st.markdown("### ➕ Nuevo dato")
 
     df_cuentas = read_ws_df("Cuentas")
@@ -768,7 +754,6 @@ def pantalla_datos():
         else:
             correo_new = st.text_input("Correo (sin opciones)", key="datos_new_correo_txt")
 
-    # ---------- RESTO CAMPOS DENTRO DEL FORM ----------
     with st.form("form_nuevo_dato"):
         col1, col2, col3 = st.columns(3)
 
@@ -790,7 +775,7 @@ def pantalla_datos():
             activ_new = st.selectbox("Activación", activ_exist if activ_exist else [""])
 
         with col3:
-            fecha_pedido_new = st.date_input("Fecha del pedido", value=date.today())
+            fecha_pedido_new = st.date_input("Fecha del pedido", value=date.today(), format="DD/MM/YYYY")
             usuario_new = st.text_input("Usuario")
             pin_new = st.text_input("PIN")
             costo_new = st.number_input("Costo", min_value=0.0, step=1.0)
@@ -820,7 +805,6 @@ def pantalla_datos():
 
     st.markdown("---")
 
-    # ---------- TABLA DATOS ----------
     desired_cols = [
         "Plataforma",
         "LogoURL",
@@ -853,7 +837,6 @@ def pantalla_datos():
         column_config={"LogoURL": st.column_config.ImageColumn("Logo", width="small")},
     )
 
-    # ---------- EDITAR DATO ----------
     st.markdown("#### ✏️ Editar dato")
 
     opciones_edit = [
@@ -878,7 +861,6 @@ def pantalla_datos():
             row_data = row.drop(labels=["_sheet_row"]).to_dict()
             dialog_editar_dato(sheet_row, row_data, df_noidx)
 
-    # ---------- ELIMINAR DATO ----------
     st.markdown("---")
     st.markdown("### 🗑️ Eliminar dato")
 
@@ -886,10 +868,7 @@ def pantalla_datos():
         f"{int(r['_sheet_row'])} · {r.get('Plataforma','')} · {r.get('Cliente','')}"
         for _, r in df.iterrows()
     ]
-    mapa_row_del = {
-        opt: int(r["_sheet_row"])
-        for opt, (_, r) in zip(opciones_del, df.iterrows())
-    }
+    mapa_row_del = {opt: int(r["_sheet_row"]) for opt, (_, r) in zip(opciones_del, df.iterrows())}
 
     col_sel_del, col_btn_del = st.columns([3, 1])
     with col_sel_del:
