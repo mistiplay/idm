@@ -413,7 +413,22 @@ def pantalla_cuentas():
             suscripcion_new = st.selectbox("Suscripción", suscs_exist)
 
         with col2:
-            correo_new = st.text_input("Correo")
+            # Correo dependiente de Plataforma + Proveedor
+            df_correos = read_ws_df("Correos")
+            if not df_correos.empty:
+                mask = (
+                    (df_correos["Plataforma"] == plataforma_new) &
+                    (df_correos["Proveedor"] == proveedor_new)
+                )
+                opciones_correo = sorted({x for x in df_correos[mask]["Correo"].unique() if str(x).strip()})
+            else:
+                opciones_correo = []
+
+            if opciones_correo:
+                correo_new = st.selectbox("Correo", opciones_correo)
+            else:
+                correo_new = st.text_input("Correo (sin opciones disponibles)")
+
             proved_exist = sorted({x for x in df_noidx["Proveedor"].unique() if str(x).strip()})
             proveedor_new = st.selectbox("Proveedor", proved_exist)
 
