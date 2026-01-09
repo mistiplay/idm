@@ -339,8 +339,17 @@ def pantalla_cuentas():
             st.rerun()
 
     # Mostrar exactamente igual que en Sheets (sin columna # extra)
-    df_noidx = df.drop(columns=["_sheet_row"]).copy()
-    st.data_editor(df_noidx, use_container_width=True, disabled=True)
+df_noidx = df.drop(columns=["_sheet_row"]).copy()
+
+st.data_editor(
+    df_noidx,
+    use_container_width=True,
+    disabled=True,
+    column_config={
+        "LogoURL": st.column_config.ImageColumn("Logo", width="small"),
+    },
+)
+
 
     # Selector usando el mismo índice que muestra Streamlit (0,1,2,...)
     opciones = [
