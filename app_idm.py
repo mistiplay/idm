@@ -235,7 +235,6 @@ def append_row_only_fields(ws_title: str, valores_dict: dict):
     No toca columnas con fórmulas.
     """
     ws = open_ws(ws_title)
-
     ws.append_row([], value_input_option="USER_ENTERED")
     data = ws.get_all_values()
     last_row = len(data)
@@ -261,6 +260,12 @@ def sort_sheet_by_column(ws_title: str, column_name: str):
 
 def select_existing_columns(df: pd.DataFrame, desired_cols: list[str]) -> list[str]:
     return [c for c in desired_cols if c in df.columns]
+
+def uniq_nonempty(series: pd.Series) -> list[str]:
+    if series is None:
+        return []
+    vals = [str(x).strip() for x in series.unique()]
+    return sorted({v for v in vals if v})
 
 
 # =========================
@@ -349,15 +354,16 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
 
 
 # =========================
-# 7) EDITAR: DATOS
+# 7) EDITAR: DATOS (con Plataforma/Proveedor/Correo desde CUENTAS)
 # =========================
 @st.dialog("Editar dato", width="large")
 def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
     st.write(f"Fila en Google Sheets (Datos): **{sheet_row}**")
 
+    # NO mostrar en el dialog
+    skip_cols = {"Logo", "LogoURL", "RCliente"}
+
     protected = {
-        "Logo",
-        "LogoURL",
         "Estado",
         "Dias Restantes",
         "Fecha de fin",
@@ -366,21 +372,97 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
     }
 
     list_columns = {
-        "Plataforma",
         "Suscripcion",
         "Combo",
         "Pago",
         "Activación",
-        "Proveedor",
+        # Plataforma/Proveedor/Correo se manejan aparte (dependientes)
     }
-
     number_columns = {"Costo"}
     date_columns = {"Fecha del pedido"}
 
-    new_vals = {}
-    headers = list(row_data.keys())
+    # ---- Fuente: CUENTAS para Plataforma/Proveedor/Correo ----
+    df_cuentas = read_ws_df("Cuentas")
+    df_c = df_cuentas.drop(columns=["_sheet_row"], errors="ignore").copy()
+    df_c = safe_strip_columns(df_c)
 
+    plataforma_actual = str(row_data.get("Plataforma", "")).strip()
+    proveedor_actual = str(row_data.get("Proveedor", "")).strip()
+    correo_actual = str(row_data.get("Correo", "")).strip()
+
+    plataformas_ops = uniq_nonempty(df_c["Plataforma"]) if "Plataforma" in df_c.columns else []
+    if plataforma_actual and plataforma_actual not in plataformas_ops:
+        plataformas_ops.append(plataforma_actual)
+
+    colA, colB, colC = st.columns(3)
+
+    with colA:
+        idxp = plataformas_ops.index(plataforma_actual) if plataforma_actual in plataformas_ops and plataformas_ops else 0
+        plataforma_new = st.selectbox(
+            "Plataforma",
+            plataformas_ops if plataformas_ops else [""],
+            index=idxp,
+            key=f"edit_datos_plataforma_{sheet_row}",
+        )
+
+    # Proveedor: se filtra por plataforma seleccionada (más fácil de usar)
+    proveedores_ops = []
+    if not df_c.empty and all(c in df_c.columns for c in ["Plataforma", "Proveedor"]):
+        proveedores_ops = uniq_nonempty(df_c.loc[df_c["Plataforma"] == plataforma_new, "Proveedor"])
+    if proveedor_actual and proveedor_actual not in proveedores_ops:
+        proveedores_ops.append(proveedor_actual)
+
+    with colB:
+        idxprov = proveedores_ops.index(proveedor_actual) if proveedor_actual in proveedores_ops and proveedores_ops else 0
+        proveedor_new = st.selectbox(
+            "Proveedor",
+            proveedores_ops if proveedores_ops else [""],
+            index=idxprov,
+            key=f"edit_datos_proveedor_{sheet_row}",
+        )
+
+    correos_ops = []
+    if not df_c.empty and all(c in df_c.columns for c in ["Plataforma", "Proveedor", "Correo"]):
+        mask = (df_c["Plataforma"] == plataforma_new) & (df_c["Proveedor"] == proveedor_new)
+        correos_ops = uniq_nonempty(df_c.loc[mask, "Correo"])
+
+    # Mantener correo actual aunque no esté en las opciones
+    if correo_actual and correo_actual not in correos_ops:
+        correos_ops.append(correo_actual)
+
+    with colC:
+        if correos_ops:
+            idxc = correos_ops.index(correo_actual) if correo_actual in correos_ops else 0
+            correo_new = st.selectbox(
+                "Correo",
+                correos_ops,
+                index=idxc,
+                key=f"edit_datos_correo_{sheet_row}",
+            )
+        else:
+            correo_new = st.text_input(
+                "Correo (sin opciones)",
+                value=correo_actual,
+                key=f"edit_datos_correo_txt_{sheet_row}",
+            )
+
+    # Guardar estos 3 valores sí o sí
+    new_vals = {
+        "Plataforma": plataforma_new,
+        "Proveedor": proveedor_new,
+        "Correo": correo_new,
+    }
+
+    st.markdown("---")
+
+    # ---- Resto de campos ----
+    headers = list(row_data.keys())
     for h in headers:
+        if h in skip_cols:
+            continue
+        if h in {"Plataforma", "Proveedor", "Correo"}:
+            continue
+
         val = row_data.get(h, "")
 
         if h in protected:
@@ -421,21 +503,23 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
             new_vals[h] = new_sel
             continue
 
-        # Correo: por ahora queda editable como texto (sin hoja "Correos")
         new_text = st.text_input(h, value=str(val), key=f"txt_datos_{h}_{sheet_row}")
         new_vals[h] = new_text
 
     if st.button("💾 Guardar cambios (Datos)", use_container_width=True, key=f"save_datos_{sheet_row}"):
         df_cols = [c for c in df_noidx.columns]
-        col_indices = []
-        values = []
+        col_indices, values = [], []
+
         for h in df_cols:
+            if h in skip_cols:
+                continue
             if h in protected:
                 continue
             if h in new_vals:
                 idx = df_cols.index(h)
                 col_indices.append(idx)
                 values.append(new_vals[h])
+
         update_single_cells("Datos", sheet_row, col_indices, values)
         st.success("✅ Cambios guardados en 'Datos'.")
         st.cache_data.clear()
@@ -512,7 +596,7 @@ def pantalla_cuentas():
     # ---------- TABLA PRINCIPAL ----------
     desired_cols = [
         "Plataforma",
-        "LogoURL",          # se mostrará como "Logo"
+        "LogoURL",
         "Suscripcion",
         "Correo",
         "Estado",
@@ -532,9 +616,7 @@ def pantalla_cuentas():
         df_vista,
         use_container_width=True,
         disabled=True,
-        column_config={
-            "LogoURL": st.column_config.ImageColumn("Logo", width="small"),
-        },
+        column_config={"LogoURL": st.column_config.ImageColumn("Logo", width="small")},
     )
 
     # ---------- EDITAR FILA ----------
@@ -618,15 +700,17 @@ def pantalla_datos():
 
     df_noidx = df.drop(columns=["_sheet_row"]).copy()
 
-    # ---------- FORMULARIO NUEVO DATO ----------
-        # ---------- NUEVO DATO (Correo dependiente de Cuentas) ----------
+    # ---------- NUEVO DATO (Plataforma/Proveedor/Correo desde CUENTAS) ----------
     st.markdown("### ➕ Nuevo dato")
 
-    # 1) Selectores fuera del form (para que Correo se actualice al instante)
+    df_cuentas = read_ws_df("Cuentas")
+    df_c = df_cuentas.drop(columns=["_sheet_row"], errors="ignore").copy()
+    df_c = safe_strip_columns(df_c)
+
     colA, colB, colC = st.columns(3)
 
     with colA:
-        plataformas_exist = sorted({x for x in df_noidx.get("Plataforma", pd.Series()).unique() if str(x).strip()})
+        plataformas_exist = uniq_nonempty(df_c["Plataforma"]) if "Plataforma" in df_c.columns else [""]
         plataforma_new = st.selectbox(
             "Plataforma",
             plataformas_exist if plataformas_exist else [""],
@@ -634,21 +718,19 @@ def pantalla_datos():
         )
 
     with colB:
-        proved_exist = sorted({x for x in df_noidx.get("Proveedor", pd.Series()).unique() if str(x).strip()})
+        proved_exist = []
+        if not df_c.empty and all(c in df_c.columns for c in ["Plataforma", "Proveedor"]):
+            proved_exist = uniq_nonempty(df_c.loc[df_c["Plataforma"] == plataforma_new, "Proveedor"])
         proveedor_new = st.selectbox(
             "Proveedor",
             proved_exist if proved_exist else [""],
             key="datos_new_proveedor",
         )
 
-    # 2) Construir correos desde la hoja "Cuentas"
-    df_cuentas = read_ws_df("Cuentas")
     correos_ops = []
-    if not df_cuentas.empty:
-        df_c = df_cuentas.drop(columns=["_sheet_row"], errors="ignore").copy()
-        if all(c in df_c.columns for c in ["Plataforma", "Proveedor", "Correo"]):
-            mask = (df_c["Plataforma"] == plataforma_new) & (df_c["Proveedor"] == proveedor_new)
-            correos_ops = sorted({x for x in df_c.loc[mask, "Correo"].unique() if str(x).strip()})
+    if not df_c.empty and all(c in df_c.columns for c in ["Plataforma", "Proveedor", "Correo"]):
+        mask = (df_c["Plataforma"] == plataforma_new) & (df_c["Proveedor"] == proveedor_new)
+        correos_ops = uniq_nonempty(df_c.loc[mask, "Correo"])
 
     with colC:
         if correos_ops:
@@ -656,7 +738,7 @@ def pantalla_datos():
         else:
             correo_new = st.text_input("Correo (sin opciones)", key="datos_new_correo_txt")
 
-    # 3) El resto de campos sí van dentro del form + botón submit
+    # ---------- RESTO CAMPOS DENTRO DEL FORM ----------
     with st.form("form_nuevo_dato"):
         col1, col2, col3 = st.columns(3)
 
@@ -711,7 +793,7 @@ def pantalla_datos():
     # ---------- TABLA DATOS ----------
     desired_cols = [
         "Plataforma",
-        "LogoURL",          # se mostrará como "Logo"
+        "LogoURL",
         "Cliente",
         "Notas",
         "Suscripcion",
@@ -729,6 +811,7 @@ def pantalla_datos():
         "PIN",
         "Costo",
         "Info Cliente",
+        "RCliente",
     ]
     columnas_visibles = select_existing_columns(df_noidx, desired_cols)
     df_vista = df_noidx[columnas_visibles].copy()
@@ -737,9 +820,7 @@ def pantalla_datos():
         df_vista,
         use_container_width=True,
         disabled=True,
-        column_config={
-            "LogoURL": st.column_config.ImageColumn("Logo", width="small"),
-        },
+        column_config={"LogoURL": st.column_config.ImageColumn("Logo", width="small")},
     )
 
     # ---------- EDITAR DATO ----------
