@@ -214,26 +214,18 @@ def col_to_letter(n: int) -> str:
     return letters
 
 def update_partial_row(ws_title: str, sheet_row: int, col_indices: list[int], values: list):
-    """
-    col_indices: índices (0-based) sobre la fila de datos (sin _sheet_row),
-                 es decir, 0 = primera columna visible en Sheets.
-    """
     ws = open_ws(ws_title)
     if not col_indices:
         return
-    # convertir índices a letras A,B,C...
     start_idx = min(col_indices)
     end_idx = max(col_indices)
-    start_letter = col_to_letter(start_idx + 1)   # +1 porque A = 1
+    start_letter = col_to_letter(start_idx + 1)
     end_letter = col_to_letter(end_idx + 1)
     range_a1 = f"{start_letter}{sheet_row}:{end_letter}{sheet_row}"
-
-    # construir lista con huecos donde no se actualiza
     row_values = []
     v_map = {i: v for i, v in zip(col_indices, values)}
     for i in range(start_idx, end_idx + 1):
         row_values.append(v_map.get(i, ""))
-
     ws.update(range_a1, [row_values])
 
 # =========================
@@ -315,10 +307,9 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
         new_vals[h] = new_text
 
     if st.button("💾 Guardar cambios", use_container_width=True, key=f"save_{sheet_row}"):
-        df_cols = [c for c in df_noidx.columns]  # sin _sheet_row
+        df_cols = [c for c in df_noidx.columns]
         col_indices = []
         values = []
-
         for h in df_cols:
             if h in PROTECTED_CUENTAS:
                 continue
@@ -326,7 +317,6 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
                 idx = df_cols.index(h)
                 col_indices.append(idx)
                 values.append(new_vals[h])
-
         update_partial_row("Cuentas", sheet_row, col_indices, values)
         st.success("✅ Guardado en Google Sheets.")
         st.cache_data.clear()
@@ -344,11 +334,14 @@ def pantalla_cuentas():
 
     st.subheader("📄 Cuentas")
 
-    df_noidx = df.drop(columns=["_sheet_row"]).copy()
-    df_view = df_noidx.copy()
-    df_view.insert(0, "#", range(1, len(df_view) + 1))
+    col_ref, _ = st.columns([1, 4])
+    with col_ref:
+        if st.button("🔄 Refrescar tabla", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
 
-    st.data_editor(df_view, use_container_width=True, disabled=True)
+    df_noidx = df.drop(columns=["_sheet_row"]).copy()
+    st.data_editor(df_noidx, use_container_width=True, disabled=True)
 
     opciones = [
         f"{i+1} · {r.get('Plataforma','')} · {r.get('Correo','')}"
@@ -357,7 +350,7 @@ def pantalla_cuentas():
     mapa_idx = {opt: i for i, opt in enumerate(opciones)}
 
     st.markdown("#### ✏️ Editar fila")
-    col_sel, col_btn, col_ref = st.columns([3, 1, 1])
+    col_sel, col_btn = st.columns([3, 1])
 
     with col_sel:
         seleccion = st.selectbox(
@@ -374,11 +367,6 @@ def pantalla_cuentas():
             sheet_row = int(row["_sheet_row"])
             row_data = row.drop(labels=["_sheet_row"]).to_dict()
             dialog_editar_cuenta(sheet_row, row_data, df_noidx)
-
-    with col_ref:
-        if st.button("🔄 Refrescar tabla", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
 
 # =========================
 # 8) TABS
