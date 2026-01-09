@@ -3,6 +3,7 @@ from datetime import date
 import streamlit as st
 import pandas as pd
 import gspread
+from gspread.utils import ValueRenderOption, DateTimeOption
 from oauth2client.service_account import ServiceAccountCredentials
 from streamlit_javascript import st_javascript
 
@@ -203,24 +204,42 @@ def safe_strip_columns(df: pd.DataFrame) -> pd.DataFrame:
 @st.cache_data(ttl=120)
 def read_ws_df(title: str) -> pd.DataFrame:
     ws = open_ws(title)
-    values = ws.get_all_values()
+
+    # Lee valores SIN formato (fechas como número de Google Sheets)
+    values = ws.get_all_values(
+        value_render_option=ValueRenderOption.unformatted,
+        date_time_render_option=DateTimeOption.serial_number,
+    )
+
     if not values:
         return pd.DataFrame()
-    headers = [h.strip() for h in values[0]]
+
+    headers = [str(h).strip() for h in values[0]]
     rows = values[1:]
     df = pd.DataFrame(rows, columns=headers)
     df = safe_strip_columns(df)
     df.insert(0, "_sheet_row", range(2, 2 + len(df)))
     return df
 
+
 def parse_date_cell(val):
-    s = str(val).strip()
-    if not s:
+    # Vacío -> sin fecha
+    if val is None or str(val).strip() == "":
         return None
-    dt = pd.to_datetime(s, dayfirst=True, errors="coerce")
+
+    # Caso 1: viene como número (serial de Google Sheets)
+    try:
+        n = float(val)
+        return pd.to_datetime(n, unit="D", origin="1899-12-30").date()
+    except Exception:
+        pass
+
+    # Caso 2: viene como texto (por si alguna celda es texto)
+    dt = pd.to_datetime(str(val).strip(), dayfirst=True, errors="coerce")
     if pd.isna(dt):
         return None
     return dt.date()
+
 
 
 def col_to_letter(n: int) -> str:
@@ -308,16 +327,17 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
             st.text_input(h, value=str(val), disabled=True)
             continue
 
-        if h in DATE_COLUMNS_CUENTAS:
-            parsed = parse_date_cell(val)
-            new_date = st.date_input(
-                h,
-                value=parsed,
-                format="DD/MM/YYYY",
-                key=f"date_cuentas_{h}_{sheet_row}",
-            )
-            new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
-            continue
+    if h in DATE_COLUMNS_CUENTAS:
+        parsed = parse_date_cell(val)
+        new_date = st.date_input(
+            h,
+            value=parsed,
+            format="DD/MM/YYYY",
+            key=f"date_cuentas_{h}_{sheet_row}",
+        )
+        new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
+        continue
+
 
 
         if h in NUMBER_COLUMNS_CUENTAS:
@@ -479,16 +499,17 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
             st.text_input(h, value=str(val), disabled=True)
             continue
 
-        if h in date_columns:
-            parsed = parse_date_cell(val)
-            new_date = st.date_input(
-                h,
-                value=parsed,
-                format="DD/MM/YYYY",
-                key=f"date_datos_{h}_{sheet_row}",
-            )
-            new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
-            continue
+    if h in date_columns:
+        parsed = parse_date_cell(val)
+        new_date = st.date_input(
+            h,
+            value=parsed,
+            format="DD/MM/YYYY",
+            key=f"date_datos_{h}_{sheet_row}",
+        )
+        new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
+        continue
+
 
 
         if h in number_columns:
