@@ -213,6 +213,16 @@ def read_ws_df(title: str) -> pd.DataFrame:
     df.insert(0, "_sheet_row", range(2, 2 + len(df)))
     return df
 
+def parse_date_cell(val):
+    s = str(val).strip()
+    if not s:
+        return None
+    dt = pd.to_datetime(s, dayfirst=True, errors="coerce")
+    if pd.isna(dt):
+        return None
+    return dt.date()
+
+
 def col_to_letter(n: int) -> str:
     letters = ""
     while n:
@@ -299,16 +309,16 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
             continue
 
         if h in DATE_COLUMNS_CUENTAS:
-            s = str(val).strip()
-            parsed = None
-            if s:
-                try:
-                    parsed = pd.to_datetime(s, dayfirst=True, errors="raise").date()
-                except Exception:
-                    parsed = None
-            new_date = st.date_input(h, value=parsed, key=f"date_cuentas_{h}_{sheet_row}")
+            parsed = parse_date_cell(val)
+            new_date = st.date_input(
+                h,
+                value=parsed,
+                format="DD/MM/YYYY",
+                key=f"date_cuentas_{h}_{sheet_row}",
+            )
             new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
             continue
+
 
         if h in NUMBER_COLUMNS_CUENTAS:
             s = str(val).strip()
@@ -470,16 +480,16 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
             continue
 
         if h in date_columns:
-            s = str(val).strip()
-            parsed = None
-            if s:
-                try:
-                    parsed = pd.to_datetime(s, dayfirst=True, errors="raise").date()
-                except Exception:
-                    parsed = None
-            new_date = st.date_input(h, value=parsed, key=f"date_datos_{h}_{sheet_row}")
+            parsed = parse_date_cell(val)
+            new_date = st.date_input(
+                h,
+                value=parsed,
+                format="DD/MM/YYYY",
+                key=f"date_datos_{h}_{sheet_row}",
+            )
             new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
             continue
+
 
         if h in number_columns:
             s = str(val).strip()
