@@ -254,13 +254,22 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
             continue
 
         if h in NUMBER_COLUMNS_CUENTAS:
+            # limpiar cualquier símbolo de moneda y espacios
+            s = str(val).strip()
+            # ejemplos posibles: "18", "18.0", "S/.18.00", "S/ 18,00"
+            for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/", "S/.", "S/. ", "S/ ", "S/. "]:
+                s = s.replace(ch, "")
+            s = s.replace(" ", "")
+            s = s.replace(",", ".")
             try:
-                num_val = float(str(val).replace(",", ".") or 0)
+                num_val = float(s) if s else 0.0
             except:
                 num_val = 0.0
+
             new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_{h}_{sheet_row}")
             new_vals[h] = new_num
             continue
+
 
         if h in LIST_COLUMNS_CUENTAS:
             opciones = sorted({x for x in df[h].unique() if str(x).strip()})
