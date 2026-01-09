@@ -323,63 +323,64 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
     for h in headers:
         val = row_data.get(h, "")
 
-    if h in PROTECTED_CUENTAS:
-        st.text_input(h, value=str(val), disabled=True)
-        continue
+        if h in PROTECTED_CUENTAS:
+            st.text_input(h, value=str(val), disabled=True)
+            continue
 
-    if h in DATE_COLUMNS_CUENTAS:
-        parsed = parse_date_cell(val)
-        new_date = st.date_input(
-            h,
-            value=parsed,
-            format="DD/MM/YYYY",
-            key=f"date_cuentas_{h}_{sheet_row}",
-        )
-        new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
-        continue
+        if h in DATE_COLUMNS_CUENTAS:
+            parsed = parse_date_cell(val)
+            new_date = st.date_input(
+                h,
+                value=parsed,
+                format="DD/MM/YYYY",
+                key=f"date_cuentas_{h}_{sheet_row}",
+            )
+            new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
+            continue
 
-    if h in NUMBER_COLUMNS_CUENTAS:
-        s = str(val).strip()
-        for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/"]:
-            s = s.replace(ch, "")
-        s = s.replace(" ", "").replace(",", ".")
-        try:
-            num_val = float(s) if s else 0.0
-        except Exception:
-            num_val = 0.0
-        new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_cuentas_{h}_{sheet_row}")
-        new_vals[h] = new_num
-        continue
+        if h in NUMBER_COLUMNS_CUENTAS:
+            s = str(val).strip()
+            for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/"]:
+                s = s.replace(ch, "")
+            s = s.replace(" ", "").replace(",", ".")
+            try:
+                num_val = float(s) if s else 0.0
+            except Exception:
+                num_val = 0.0
+            new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_cuentas_{h}_{sheet_row}")
+            new_vals[h] = new_num
+            continue
 
-    if h in LIST_COLUMNS_CUENTAS and h in df_noidx.columns:
-        opciones = sorted({x for x in df_noidx[h].unique() if str(x).strip()})
-        if val and val not in opciones:
-            opciones.append(val)
-        default_idx = opciones.index(val) if val in opciones and opciones else 0
-        new_sel = st.selectbox(h, opciones, index=default_idx, key=f"sel_cuentas_{h}_{sheet_row}")
-        new_vals[h] = new_sel
-        continue
+        if h in LIST_COLUMNS_CUENTAS and h in df_noidx.columns:
+            opciones = sorted({x for x in df_noidx[h].unique() if str(x).strip()})
+            if val and val not in opciones:
+                opciones.append(val)
+            default_idx = opciones.index(val) if val in opciones and opciones else 0
+            new_sel = st.selectbox(h, opciones, index=default_idx, key=f"sel_cuentas_{h}_{sheet_row}")
+            new_vals[h] = new_sel
+            continue
 
-    new_text = st.text_input(h, value=str(val), key=f"txt_cuentas_{h}_{sheet_row}")
-    new_vals[h] = new_text
-
+        new_text = st.text_input(h, value=str(val), key=f"txt_cuentas_{h}_{sheet_row}")
+        new_vals[h] = new_text
 
     if st.button("💾 Guardar cambios", use_container_width=True, key=f"save_cuentas_{sheet_row}"):
         df_cols = [c for c in df_noidx.columns]
         col_indices = []
         values = []
-        for h in df_cols:
-            if h in PROTECTED_CUENTAS:
+        for colname in df_cols:
+            if colname in PROTECTED_CUENTAS:
                 continue
-            if h in new_vals:
-                idx = df_cols.index(h)
+            if colname in new_vals:
+                idx = df_cols.index(colname)
                 col_indices.append(idx)
-                values.append(new_vals[h])
+                values.append(new_vals[colname])
+
         update_single_cells("Cuentas", sheet_row, col_indices, values)
         st.success("✅ Guardado en Google Sheets.")
         st.cache_data.clear()
         time.sleep(0.8)
         st.rerun()
+
 
 
 # =========================
