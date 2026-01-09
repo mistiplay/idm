@@ -5,7 +5,9 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from streamlit_javascript import st_javascript
 
-# ---------- CONFIG + CSS ----------
+# =========================
+# 1) CONFIG + CSS
+# =========================
 st.set_page_config(page_title="Admin Streaming", layout="wide")
 
 st.markdown("""
@@ -26,7 +28,11 @@ div[class*="viewerBadge"] { display: none !important; }
     background-attachment: fixed;
     color: white;
 }
-.block-container { max-width: 100% !important; padding-top: 2rem !important; }
+.block-container {
+    padding-top: 2rem !important;
+    padding-bottom: 2rem !important;
+    max-width: 100% !important;
+}
 
 .login-box {
     text-align: center;
@@ -50,11 +56,15 @@ div[class*="viewerBadge"] { display: none !important; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-[data-testid="stDataEditor"] { background-color: rgba(20,20,20,0.95); }
+[data-testid="stDataEditor"] {
+    background-color: rgba(20,20,20,0.95);
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- SECRETS ----------
+# =========================
+# 2) SECRETS
+# =========================
 try:
     SHEET_URL = st.secrets["general"]["sheet_url"]
     admin_ips_str = st.secrets["general"]["admin_ips"]
@@ -63,7 +73,9 @@ except Exception:
     st.error("⚠️ Falta configurar [general] sheet_url y admin_ips en secrets.toml")
     st.stop()
 
-# ---------- LOGIN POR IP ----------
+# =========================
+# 3) LOGIN POR IP
+# =========================
 def get_my_ip():
     try:
         url = "https://api.ipify.org"
@@ -145,7 +157,9 @@ if not st.session_state.logged_in:
                 st.stop()
     st.stop()
 
-# ---------- HEADER ----------
+# =========================
+# 4) HEADER
+# =========================
 st.markdown(f"""
 <div style="display:flex; justify-content:space-between; align-items:center;
             background:rgba(17,17,17,0.96); border:1px solid #333; border-radius:10px;
@@ -155,7 +169,9 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ---------- GOOGLE SHEETS ----------
+# =========================
+# 5) GOOGLE SHEETS
+# =========================
 @st.cache_resource
 def gs_client():
     scope = [
@@ -201,9 +217,11 @@ def update_row_in_sheet(ws_title: str, sheet_row: int, headers: list[str], value
     ws = open_ws(ws_title)
     last_col_letter = col_to_letter(len(headers))
     range_a1 = f"A{sheet_row}:{last_col_letter}{sheet_row}"
-    ws.update(range_a1, [values])  # [web:205][web:216]
+    ws.update(range_a1, [values])  # [web:147][web:216]
 
-# ---------- CONFIG CAMPOS CUENTAS ----------
+# =========================
+# 6) CUENTAS: CONFIG + MODAL
+# =========================
 PROTECTED_CUENTAS = {
     "Logo", "Estado", "Dias", "Perfiles Activos",
     "Perfiles Disponibles", "Fecha de fin"
@@ -214,11 +232,8 @@ DATE_COLUMNS_CUENTAS = {"Fecha del pedido"}
 
 @st.dialog("Editar cuenta", width="large")
 def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
-    # row_data ya NO tiene _sheet_row
     headers = list(row_data.keys())
     st.write(f"Fila en Google Sheets: **{sheet_row}**")
-    # DEBUG opcional: ver qué llega
-    # st.json(row_data)
 
     new_vals = {}
 
@@ -236,26 +251,28 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
                 parsed = None
             new_date = st.date_input(h, value=parsed, key=f"date_{h}_{sheet_row}")
             new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
+            continue
 
-        elif h in NUMBER_COLUMNS_CUENTAS:
+        if h in NUMBER_COLUMNS_CUENTAS:
             try:
                 num_val = float(str(val).replace(",", ".") or 0)
             except:
                 num_val = 0.0
             new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_{h}_{sheet_row}")
             new_vals[h] = new_num
+            continue
 
-        elif h in LIST_COLUMNS_CUENTAS:
+        if h in LIST_COLUMNS_CUENTAS:
             opciones = sorted({x for x in df[h].unique() if str(x).strip()})
             if val and val not in opciones:
                 opciones.append(val)
             default_idx = opciones.index(val) if val in opciones and opciones else 0
             new_sel = st.selectbox(h, opciones, index=default_idx, key=f"sel_{h}_{sheet_row}")
             new_vals[h] = new_sel
+            continue
 
-        else:
-            new_text = st.text_input(h, value=str(val), key=f"txt_{h}_{sheet_row}")
-            new_vals[h] = new_text
+        new_text = st.text_input(h, value=str(val), key=f"txt_{h}_{sheet_row}")
+        new_vals[h] = new_text
 
     if st.button("💾 Guardar cambios", use_container_width=True, key=f"save_{sheet_row}"):
         final_values = []
@@ -266,12 +283,16 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
                 final_values.append(row_data.get(h, ""))
             else:
                 final_values.append(new_vals.get(h, row_data.get(h, "")))
-        update_row_in_sheet("Cuentas", sheet_row, [c for c in df.columns if c != "_sheet_row"], final_values)
+        headers = [c for c in df.columns if c != "_sheet_row"]
+        update_row_in_sheet("Cuentas", sheet_row, headers, final_values)
         st.success("✅ Guardado en Google Sheets.")
         st.cache_data.clear()
         time.sleep(1)
         st.rerun()
 
+# =========================
+# 7) PANTALLA CUENTAS
+# =========================
 def pantalla_cuentas():
     df = read_ws_df("Cuentas")
     if df.empty:
@@ -305,7 +326,12 @@ def pantalla_cuentas():
             idx = mapa_idx[seleccion]
             row = df.iloc[idx]
             sheet_row = int(row["_sheet_row"])
-            # row_data SOLO con las columnas visibles
             row_data = row.drop(labels=["_sheet_row"]).to_dict()
             dialog_editar_cuenta(sheet_row, row_data, df)
 
+# =========================
+# 8) TABS
+# =========================
+tab_cuentas, = st.tabs(["Cuentas"])
+with tab_cuentas:
+    pantalla_cuentas()
