@@ -321,11 +321,11 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
     new_vals = {}
 
     for h in headers:
-        val = row_data.get(h, "")
+    val = row_data.get(h, "")
 
-        if h in PROTECTED_CUENTAS:
-            st.text_input(h, value=str(val), disabled=True)
-            continue
+    if h in PROTECTED_CUENTAS:
+        st.text_input(h, value=str(val), disabled=True)
+        continue
 
     if h in DATE_COLUMNS_CUENTAS:
         parsed = parse_date_cell(val)
@@ -338,32 +338,31 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
         new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
         continue
 
+    if h in NUMBER_COLUMNS_CUENTAS:
+        s = str(val).strip()
+        for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/"]:
+            s = s.replace(ch, "")
+        s = s.replace(" ", "").replace(",", ".")
+        try:
+            num_val = float(s) if s else 0.0
+        except Exception:
+            num_val = 0.0
+        new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_cuentas_{h}_{sheet_row}")
+        new_vals[h] = new_num
+        continue
 
+    if h in LIST_COLUMNS_CUENTAS and h in df_noidx.columns:
+        opciones = sorted({x for x in df_noidx[h].unique() if str(x).strip()})
+        if val and val not in opciones:
+            opciones.append(val)
+        default_idx = opciones.index(val) if val in opciones and opciones else 0
+        new_sel = st.selectbox(h, opciones, index=default_idx, key=f"sel_cuentas_{h}_{sheet_row}")
+        new_vals[h] = new_sel
+        continue
 
-        if h in NUMBER_COLUMNS_CUENTAS:
-            s = str(val).strip()
-            for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/"]:
-                s = s.replace(ch, "")
-            s = s.replace(" ", "").replace(",", ".")
-            try:
-                num_val = float(s) if s else 0.0
-            except Exception:
-                num_val = 0.0
-            new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_cuentas_{h}_{sheet_row}")
-            new_vals[h] = new_num
-            continue
+    new_text = st.text_input(h, value=str(val), key=f"txt_cuentas_{h}_{sheet_row}")
+    new_vals[h] = new_text
 
-        if h in LIST_COLUMNS_CUENTAS and h in df_noidx.columns:
-            opciones = sorted({x for x in df_noidx[h].unique() if str(x).strip()})
-            if val and val not in opciones:
-                opciones.append(val)
-            default_idx = opciones.index(val) if val in opciones and opciones else 0
-            new_sel = st.selectbox(h, opciones, index=default_idx, key=f"sel_cuentas_{h}_{sheet_row}")
-            new_vals[h] = new_sel
-            continue
-
-        new_text = st.text_input(h, value=str(val), key=f"txt_cuentas_{h}_{sheet_row}")
-        new_vals[h] = new_text
 
     if st.button("💾 Guardar cambios", use_container_width=True, key=f"save_cuentas_{sheet_row}"):
         df_cols = [c for c in df_noidx.columns]
@@ -487,17 +486,17 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
 
     # ---- Resto de campos ----
     headers = list(row_data.keys())
-    for h in headers:
-        if h in skip_cols:
-            continue
-        if h in {"Plataforma", "Proveedor", "Correo"}:
-            continue
+for h in headers:
+    if h in skip_cols:
+        continue
+    if h in {"Plataforma", "Proveedor", "Correo"}:
+        continue
 
-        val = row_data.get(h, "")
+    val = row_data.get(h, "")
 
-        if h in protected:
-            st.text_input(h, value=str(val), disabled=True)
-            continue
+    if h in protected:
+        st.text_input(h, value=str(val), disabled=True)
+        continue
 
     if h in date_columns:
         parsed = parse_date_cell(val)
@@ -510,32 +509,31 @@ def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
         new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
         continue
 
+    if h in number_columns:
+        s = str(val).strip()
+        for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/"]:
+            s = s.replace(ch, "")
+        s = s.replace(" ", "").replace(",", ".")
+        try:
+            num_val = float(s) if s else 0.0
+        except Exception:
+            num_val = 0.0
+        new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_datos_{h}_{sheet_row}")
+        new_vals[h] = new_num
+        continue
 
+    if h in list_columns and h in df_noidx.columns:
+        opciones = sorted({x for x in df_noidx[h].unique() if str(x).strip()})
+        if val and val not in opciones:
+            opciones.append(val)
+        default_idx = opciones.index(val) if val in opciones and opciones else 0
+        new_sel = st.selectbox(h, opciones, index=default_idx, key=f"sel_datos_{h}_{sheet_row}")
+        new_vals[h] = new_sel
+        continue
 
-        if h in number_columns:
-            s = str(val).strip()
-            for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/"]:
-                s = s.replace(ch, "")
-            s = s.replace(" ", "").replace(",", ".")
-            try:
-                num_val = float(s) if s else 0.0
-            except Exception:
-                num_val = 0.0
-            new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_datos_{h}_{sheet_row}")
-            new_vals[h] = new_num
-            continue
+    new_text = st.text_input(h, value=str(val), key=f"txt_datos_{h}_{sheet_row}")
+    new_vals[h] = new_text
 
-        if h in list_columns and h in df_noidx.columns:
-            opciones = sorted({x for x in df_noidx[h].unique() if str(x).strip()})
-            if val and val not in opciones:
-                opciones.append(val)
-            default_idx = opciones.index(val) if val in opciones and opciones else 0
-            new_sel = st.selectbox(h, opciones, index=default_idx, key=f"sel_datos_{h}_{sheet_row}")
-            new_vals[h] = new_sel
-            continue
-
-        new_text = st.text_input(h, value=str(val), key=f"txt_datos_{h}_{sheet_row}")
-        new_vals[h] = new_text
 
     if st.button("💾 Guardar cambios (Datos)", use_container_width=True, key=f"save_datos_{sheet_row}"):
         df_cols = [c for c in df_noidx.columns]
