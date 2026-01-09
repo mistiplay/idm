@@ -214,15 +214,11 @@ def col_to_letter(n: int) -> str:
     return letters
 
 def update_single_cells(ws_title: str, sheet_row: int, col_indices: list[int], values: list):
-    """
-    Actualiza SOLO las celdas indicadas, una por una, para no tocar columnas con fórmulas.
-    col_indices es 0-based sobre las columnas reales (sin _sheet_row).
-    """
     if not col_indices:
         return
     ws = open_ws(ws_title)
     for idx, val in zip(col_indices, values):
-        col_letter = col_to_letter(idx + 1)  # A=1
+        col_letter = col_to_letter(idx + 1)  # A = 1
         a1 = f"{col_letter}{sheet_row}"
         ws.update(a1, [[val]])
 
@@ -338,20 +334,17 @@ def pantalla_cuentas():
             st.cache_data.clear()
             st.rerun()
 
-    # Mostrar exactamente igual que en Sheets (sin columna # extra)
-df_noidx = df.drop(columns=["_sheet_row"]).copy()
+    df_noidx = df.drop(columns=["_sheet_row"]).copy()
 
-st.data_editor(
-    df_noidx,
-    use_container_width=True,
-    disabled=True,
-    column_config={
-        "LogoURL": st.column_config.ImageColumn("Logo", width="small"),
-    },
-)
+    st.data_editor(
+        df_noidx,
+        use_container_width=True,
+        disabled=True,
+        column_config={
+            "LogoURL": st.column_config.ImageColumn("Logo", width="small"),
+        },
+    )
 
-
-    # Selector usando el mismo índice que muestra Streamlit (0,1,2,...)
     opciones = [
         f"{i} · {r.get('Plataforma','')} · {r.get('Correo','')}"
         for i, (_, r) in enumerate(df_noidx.iterrows())
