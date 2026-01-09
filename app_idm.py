@@ -217,7 +217,7 @@ def update_row_in_sheet(ws_title: str, sheet_row: int, headers: list[str], value
     ws = open_ws(ws_title)
     last_col_letter = col_to_letter(len(headers))
     range_a1 = f"A{sheet_row}:{last_col_letter}{sheet_row}"
-    ws.update(range_a1, [values])  # [web:147][web:216]
+    ws.update(range_a1, [values])
 
 # =========================
 # 6) CUENTAS: CONFIG + MODAL
@@ -240,37 +240,59 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
     for h in headers:
         val = row_data.get(h, "")
 
+        # SOLO LECTURA
         if h in PROTECTED_CUENTAS:
             st.text_input(h, value=str(val), disabled=True)
             continue
 
+        # FECHA (maneja '30/5/2025' y '30 de mayo de 2025')
         if h in DATE_COLUMNS_CUENTAS:
-            try:
-                parsed = pd.to_datetime(val, dayfirst=True).date() if val else None
-            except:
-                parsed = None
+            s = str(val).strip()
+            parsed = None
+            if s:
+                # 1) intentar dd/mm/yyyy (30/5/2025)
+                try:
+                    parsed = pd.to_datetime(s, dayfirst=True, errors="raise").date()
+                except Exception:
+                    # 2) intentar formato español '30 de mayo de 2025'
+                    try:
+                        meses = {
+                            "enero": "01","febrero": "02","marzo": "03","abril": "04",
+                            "mayo": "05","junio": "06","julio": "07","agosto": "08",
+                            "septiembre": "09","setiembre": "09","octubre": "10",
+                            "noviembre": "11","diciembre": "12",
+                        }
+                        s_low = s.lower()
+                        partes = s_low.replace(" de ", " ").split()
+                        # esperado: ['30','mayo','2025']
+                        if len(partes) == 3 and partes[1] in meses:
+                            dia = partes[0]
+                            mes = meses[partes[1]]
+                            anio = partes[2]
+                            s_norm = f"{dia}/{mes}/{anio}"
+                            parsed = pd.to_datetime(s_norm, dayfirst=True, errors="raise").date()
+                    except Exception:
+                        parsed = None
+
             new_date = st.date_input(h, value=parsed, key=f"date_{h}_{sheet_row}")
             new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
             continue
 
+        # COSTO (numero, limpiando S/.)
         if h in NUMBER_COLUMNS_CUENTAS:
-            # limpiar cualquier símbolo de moneda y espacios
             s = str(val).strip()
-            # ejemplos posibles: "18", "18.0", "S/.18.00", "S/ 18,00"
-            for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/", "S/.", "S/. ", "S/ ", "S/. "]:
+            for ch in ["S/.", "S/ ", "S/", "s/.", "s/ ", "s/"]:
                 s = s.replace(ch, "")
-            s = s.replace(" ", "")
-            s = s.replace(",", ".")
+            s = s.replace(" ", "").replace(",", ".")
             try:
                 num_val = float(s) if s else 0.0
-            except:
+            except Exception:
                 num_val = 0.0
-
             new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_{h}_{sheet_row}")
             new_vals[h] = new_num
             continue
 
-
+        # LISTAS
         if h in LIST_COLUMNS_CUENTAS:
             opciones = sorted({x for x in df[h].unique() if str(x).strip()})
             if val and val not in opciones:
@@ -280,6 +302,7 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
             new_vals[h] = new_sel
             continue
 
+        # TEXTO
         new_text = st.text_input(h, value=str(val), key=f"txt_{h}_{sheet_row}")
         new_vals[h] = new_text
 
@@ -313,11 +336,11 @@ def pantalla_cuentas():
     df_view = df.drop(columns=["_sheet_row"]).copy()
     st.data_editor(df_view, use_container_width=True, disabled=True)
 
+    # filas visibles desde 1 (no desde 0)
     opciones = [
         f"{i+1} · {r.get('Plataforma','')} · {r.get('Correo','')}"
         for i, (_, r) in enumerate(df.iterrows())
     ]
-
     mapa_idx = {opt: i for i, opt in enumerate(opciones)}
 
     st.markdown("#### ✏️ Editar fila")
