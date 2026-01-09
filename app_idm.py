@@ -215,9 +215,14 @@ def col_to_letter(n: int) -> str:
 
 def update_row_in_sheet(ws_title: str, sheet_row: int, headers: list[str], values: list):
     ws = open_ws(ws_title)
-    last_col_letter = col_to_letter(len(headers))
-    range_a1 = f"A{sheet_row}:{last_col_letter}{sheet_row}"
+    # calcular rango exacto según cantidad de columnas a actualizar
+    start_col = 1  # columna A
+    end_col = start_col + len(headers) - 1
+    start_letter = col_to_letter(start_col)
+    end_letter = col_to_letter(end_col)
+    range_a1 = f"{start_letter}{sheet_row}:{end_letter}{sheet_row}"
     ws.update(range_a1, [values])
+
 
 # =========================
 # 6) CUENTAS: CONFIG + MODAL
@@ -307,20 +312,24 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
         new_vals[h] = new_text
 
     if st.button("💾 Guardar cambios", use_container_width=True, key=f"save_{sheet_row}"):
-        final_values = []
+        # Construir fila a enviar: SOLO columnas NO protegidas
+        headers = []
+        values = []
         for h in df.columns:
             if h == "_sheet_row":
                 continue
             if h in PROTECTED_CUENTAS:
-                final_values.append(row_data.get(h, ""))
-            else:
-                final_values.append(new_vals.get(h, row_data.get(h, "")))
-        headers = [c for c in df.columns if c != "_sheet_row"]
-        update_row_in_sheet("Cuentas", sheet_row, headers, final_values)
+                # No enviar nada: dejar que la fórmula del Sheet siga intacta
+                continue
+            headers.append(h)
+            values.append(new_vals.get(h, row_data.get(h, "")))
+
+        update_row_in_sheet("Cuentas", sheet_row, headers, values)
         st.success("✅ Guardado en Google Sheets.")
         st.cache_data.clear()
         time.sleep(1)
         st.rerun()
+
 
 # =========================
 # 7) PANTALLA CUENTAS
@@ -333,10 +342,13 @@ def pantalla_cuentas():
 
     st.subheader("📄 Cuentas")
 
+    # copiar y crear índice visible desde 1
     df_view = df.drop(columns=["_sheet_row"]).copy()
+    df_view.insert(0, "#", range(1, len(df_view) + 1))
+
     st.data_editor(df_view, use_container_width=True, disabled=True)
 
-    # filas visibles desde 1 (no desde 0)
+    # filas visibles desde 1 (coinciden con columna "#")
     opciones = [
         f"{i+1} · {r.get('Plataforma','')} · {r.get('Correo','')}"
         for i, (_, r) in enumerate(df.iterrows())
@@ -361,6 +373,7 @@ def pantalla_cuentas():
             sheet_row = int(row["_sheet_row"])
             row_data = row.drop(labels=["_sheet_row"]).to_dict()
             dialog_editar_cuenta(sheet_row, row_data, df)
+
 
 # =========================
 # 8) TABS
