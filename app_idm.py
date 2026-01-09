@@ -226,9 +226,15 @@ def update_single_cells(ws_title: str, sheet_row: int, col_indices: list[int], v
 # 6) CONFIG CAMPOS CUENTAS
 # =========================
 PROTECTED_CUENTAS = {
-    "Logo", "Estado", "Dias", "Perfiles Activos",
-    "Perfiles Disponibles", "Fecha de fin"
+    "LogoURL",
+    "Logo",
+    "Estado",
+    "Dias",
+    "Perfiles Activos",
+    "Perfiles Disponibles",
+    "Fecha de fin",
 }
+
 LIST_COLUMNS_CUENTAS = {"Plataforma", "Suscripcion", "Modalidad", "Proveedor"}
 NUMBER_COLUMNS_CUENTAS = {"Costo"}
 DATE_COLUMNS_CUENTAS = {"Fecha del pedido"}
@@ -334,10 +340,31 @@ def pantalla_cuentas():
             st.cache_data.clear()
             st.rerun()
 
+    # Quitamos _sheet_row para la vista
     df_noidx = df.drop(columns=["_sheet_row"]).copy()
 
+    # Solo mostramos las columnas que te interesan en el panel.
+    # IMPORTANTE: aquí NO incluimos la columna Logo de Sheets,
+    # solo LogoURL pero renombrado visualmente a "Logo".
+    columnas_visibles = [
+        "Plataforma",
+        "LogoURL",          # se verá como "Logo"
+        "Suscripcion",
+        "Correo",
+        "Estado",
+        "Dias",
+        "Perfiles Activos",
+        "Perfiles Disponibles",
+        "Fecha del pedido",
+        "Fecha de fin",
+        "Costo",
+        "Proveedor",
+    ]
+
+    df_vista = df_noidx[columnas_visibles].copy()
+
     st.data_editor(
-        df_noidx,
+        df_vista,
         use_container_width=True,
         disabled=True,
         column_config={
@@ -345,6 +372,7 @@ def pantalla_cuentas():
         },
     )
 
+    # --- Sección de edición (usa el df original, no df_vista) ---
     opciones = [
         f"{i} · {r.get('Plataforma','')} · {r.get('Correo','')}"
         for i, (_, r) in enumerate(df_noidx.iterrows())
@@ -369,6 +397,7 @@ def pantalla_cuentas():
             sheet_row = int(row["_sheet_row"])
             row_data = row.drop(labels=["_sheet_row"]).to_dict()
             dialog_editar_cuenta(sheet_row, row_data, df_noidx)
+
 
 # =========================
 # 8) TABS
