@@ -246,6 +246,10 @@ def parse_date_cell(val):
         return None
     return dt.date()
 
+def format_date_display(val):
+    d = parse_date_cell(val)
+    return d.strftime("%d/%m/%Y") if d else ""
+
 def col_to_letter(n: int) -> str:
     letters = ""
     while n:
@@ -634,6 +638,11 @@ def pantalla_cuentas():
     columnas_visibles = select_existing_columns(df_noidx, desired_cols)
     df_vista = df_noidx[columnas_visibles].copy()
 
+    # Mostrar fechas como DD/MM/YYYY en la tabla (solo visual)
+    for col in ["Fecha del pedido", "Fecha de fin"]:
+        if col in df_vista.columns:
+            df_vista[col] = df_vista[col].apply(format_date_display)
+
     st.data_editor(
         df_vista,
         use_container_width=True,
@@ -830,6 +839,11 @@ def pantalla_datos():
     columnas_visibles = select_existing_columns(df_noidx, desired_cols)
     df_vista = df_noidx[columnas_visibles].copy()
 
+    # Mostrar fechas como DD/MM/YYYY en la tabla (solo visual)
+    for col in ["Fecha del pedido", "Fecha de fin"]:
+        if col in df_vista.columns:
+            df_vista[col] = df_vista[col].apply(format_date_display)
+    
     st.data_editor(
         df_vista,
         use_container_width=True,
