@@ -222,6 +222,15 @@ def update_single_cells(ws_title: str, sheet_row: int, col_indices: list[int], v
         a1 = f"{col_letter}{sheet_row}"
         ws.update(a1, [[val]])
 
+# NUEVAS FUNCIONES: agregar y eliminar filas
+def append_ingreso(ws_title: str, valores: list[str]):
+    ws = open_ws(ws_title)
+    ws.append_row(valores, value_input_option="USER_ENTERED")  # agrega al final [web:326]
+
+def delete_ingreso(ws_title: str, sheet_row: int):
+    ws = open_ws(ws_title)
+    ws.delete_rows(sheet_row)  # elimina fila completa [web:330]
+
 # =========================
 # 6) CONFIG CAMPOS CUENTAS
 # =========================
@@ -250,6 +259,7 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
         val = row_data.get(h, "")
 
         if h in PROTECTED_CUENTAS:
+            # Solo se muestra deshabilitado
             st.text_input(h, value=str(val), disabled=True)
             continue
 
@@ -340,15 +350,60 @@ def pantalla_cuentas():
             st.cache_data.clear()
             st.rerun()
 
-    # Quitamos _sheet_row para la vista
     df_noidx = df.drop(columns=["_sheet_row"]).copy()
 
-    # Solo mostramos las columnas que te interesan en el panel.
-    # IMPORTANTE: aquí NO incluimos la columna Logo de Sheets,
-    # solo LogoURL pero renombrado visualmente a "Logo".
+    # ---------- FORMULARIO NUEVO INGRESO ----------
+    st.markdown("### ➕ Nuevo ingreso")
+
+    with st.form("form_nuevo_ingreso"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            plataformas_exist = sorted({x for x in df_noidx["Plataforma"].unique() if str(x).strip()})
+            plataforma_new = st.selectbox("Plataforma", plataformas_exist)
+            suscs_exist = sorted({x for x in df_noidx["Suscripcion"].unique() if str(x).strip()})
+            suscripcion_new = st.selectbox("Suscripción", suscs_exist)
+
+        with col2:
+            correo_new = st.text_input("Correo")
+            proved_exist = sorted({x for x in df_noidx["Proveedor"].unique() if str(x).strip()})
+            proveedor_new = st.selectbox("Proveedor", proved_exist)
+
+        with col3:
+            fecha_pedido_new = st.date_input("Fecha del pedido")
+            costo_new = st.number_input("Costo", min_value=0.0, step=1.0)
+
+        submitted = st.form_submit_button("💾 Guardar nuevo ingreso")
+
+    if submitted:
+        cols = [c for c in df.columns if c != "_sheet_row"]
+        nueva_fila = []
+        for c in cols:
+            if c == "Plataforma":
+                nueva_fila.append(plataforma_new)
+            elif c == "Suscripcion":
+                nueva_fila.append(suscripcion_new)
+            elif c == "Correo":
+                nueva_fila.append(correo_new)
+            elif c == "Proveedor":
+                nueva_fila.append(proveedor_new)
+            elif c == "Fecha del pedido":
+                nueva_fila.append(fecha_pedido_new.strftime("%d/%m/%Y"))
+            elif c == "Costo":
+                nueva_fila.append(str(costo_new))
+            else:
+                nueva_fila.append("")
+        append_ingreso("Cuentas", nueva_fila)
+        st.success("✅ Nuevo ingreso agregado.")
+        st.cache_data.clear()
+        st.rerun()
+
+    st.markdown("---")
+
+    # ---------- TABLA PRINCIPAL (solo una columna Logo) ----------
     columnas_visibles = [
         "Plataforma",
-        "LogoURL",          # se verá como "Logo"
+        "LogoURL",          # se mostrará como "Logo"
         "Suscripcion",
         "Correo",
         "Estado",
@@ -360,7 +415,6 @@ def pantalla_cuentas():
         "Costo",
         "Proveedor",
     ]
-
     df_vista = df_noidx[columnas_visibles].copy()
 
     st.data_editor(
@@ -372,7 +426,7 @@ def pantalla_cuentas():
         },
     )
 
-    # --- Sección de edición (usa el df original, no df_vista) ---
+    # ---------- EDITAR FILA ----------
     opciones = [
         f"{i} · {r.get('Plataforma','')} · {r.get('Correo','')}"
         for i, (_, r) in enumerate(df_noidx.iterrows())
@@ -398,6 +452,36 @@ def pantalla_cuentas():
             row_data = row.drop(labels=["_sheet_row"]).to_dict()
             dialog_editar_cuenta(sheet_row, row_data, df_noidx)
 
+    # ---------- ELIMINAR INGRESO ----------
+    st.markdown("---")
+    st.markdown("### 🗑️ Eliminar ingreso")
+
+    opciones_del = [
+        f"{int(r['_sheet_row'])} · {r.get('Plataforma','')} · {r.get('Correo','')}"
+        for _, r in df.iterrows()
+    ]
+    mapa_row_del = {
+        opt: int(r["_sheet_row"])
+        for opt, (_, r) in zip(opciones_del, df.iterrows())
+    }
+
+    col_sel_del, col_btn_del = st.columns([3, 1])
+
+    with col_sel_del:
+        seleccion_del = st.selectbox(
+            "Selecciona la fila a eliminar (número en Google Sheets):",
+            opciones_del,
+            index=0 if opciones_del else None,
+            key="cuentas_fila_del",
+        )
+
+    with col_btn_del:
+        if st.button("🗑️ Eliminar", use_container_width=True):
+            sheet_row_del = mapa_row_del[seleccion_del]
+            delete_ingreso("Cuentas", sheet_row_del)
+            st.success(f"✅ Ingreso eliminado (fila {sheet_row_del} en Sheets).")
+            st.cache_data.clear()
+            st.rerun()
 
 # =========================
 # 8) TABS
