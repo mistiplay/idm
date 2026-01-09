@@ -214,10 +214,14 @@ DATE_COLUMNS_CUENTAS = {"Fecha del pedido"}
 
 @st.dialog("Editar cuenta", width="large")
 def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
-    headers = [c for c in df.columns if c != "_sheet_row"]
+    # row_data ya NO tiene _sheet_row
+    headers = list(row_data.keys())
     st.write(f"Fila en Google Sheets: **{sheet_row}**")
+    # DEBUG opcional: ver qué llega
+    # st.json(row_data)
 
     new_vals = {}
+
     for h in headers:
         val = row_data.get(h, "")
 
@@ -230,7 +234,7 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
                 parsed = pd.to_datetime(val, dayfirst=True).date() if val else None
             except:
                 parsed = None
-            new_date = st.date_input(h, value=parsed)
+            new_date = st.date_input(h, value=parsed, key=f"date_{h}_{sheet_row}")
             new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
 
         elif h in NUMBER_COLUMNS_CUENTAS:
@@ -238,7 +242,7 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
                 num_val = float(str(val).replace(",", ".") or 0)
             except:
                 num_val = 0.0
-            new_num = st.number_input(h, value=num_val, step=1.0)
+            new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_{h}_{sheet_row}")
             new_vals[h] = new_num
 
         elif h in LIST_COLUMNS_CUENTAS:
@@ -246,21 +250,23 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df: pd.DataFrame):
             if val and val not in opciones:
                 opciones.append(val)
             default_idx = opciones.index(val) if val in opciones and opciones else 0
-            new_sel = st.selectbox(h, opciones, index=default_idx)
+            new_sel = st.selectbox(h, opciones, index=default_idx, key=f"sel_{h}_{sheet_row}")
             new_vals[h] = new_sel
 
         else:
-            new_text = st.text_input(h, value=str(val))
+            new_text = st.text_input(h, value=str(val), key=f"txt_{h}_{sheet_row}")
             new_vals[h] = new_text
 
-    if st.button("💾 Guardar cambios", use_container_width=True):
+    if st.button("💾 Guardar cambios", use_container_width=True, key=f"save_{sheet_row}"):
         final_values = []
-        for h in headers:
+        for h in df.columns:
+            if h == "_sheet_row":
+                continue
             if h in PROTECTED_CUENTAS:
                 final_values.append(row_data.get(h, ""))
             else:
-                final_values.append(new_vals.get(h, ""))
-        update_row_in_sheet("Cuentas", sheet_row, headers, final_values)
+                final_values.append(new_vals.get(h, row_data.get(h, "")))
+        update_row_in_sheet("Cuentas", sheet_row, [c for c in df.columns if c != "_sheet_row"], final_values)
         st.success("✅ Guardado en Google Sheets.")
         st.cache_data.clear()
         time.sleep(1)
@@ -273,10 +279,10 @@ def pantalla_cuentas():
         return
 
     st.subheader("📄 Cuentas")
+
     df_view = df.drop(columns=["_sheet_row"]).copy()
     st.data_editor(df_view, use_container_width=True, disabled=True)
 
-    # selector simple para elegir fila
     opciones = [
         f"{i} · {r.get('Plataforma','')} · {r.get('Correo','')}"
         for i, (_, r) in enumerate(df.iterrows())
@@ -299,8 +305,7 @@ def pantalla_cuentas():
             idx = mapa_idx[seleccion]
             row = df.iloc[idx]
             sheet_row = int(row["_sheet_row"])
-            dialog_editar_cuenta(sheet_row, row.to_dict(), df)
+            # row_data SOLO con las columnas visibles
+            row_data = row.drop(labels=["_sheet_row"]).to_dict()
+            dialog_editar_cuenta(sheet_row, row_data, df)
 
-tab_cuentas, = st.tabs(["Cuentas"])
-with tab_cuentas:
-    pantalla_cuentas()
