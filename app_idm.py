@@ -259,6 +259,14 @@ def delete_ingreso(ws_title: str, sheet_row: int):
     ws = open_ws(ws_title)
     ws.delete_rows(sheet_row)  # elimina fila completa [web:330]
 
+def sort_cuentas_por_plataforma():
+    ws = open_ws("Cuentas")
+    headers = ws.row_values(1)
+    if "Plataforma" in headers:
+        col_index = headers.index("Plataforma") + 1  # 1-based
+        ws.sort((col_index, "asc"))
+
+
 # =========================
 # 6) CONFIG CAMPOS CUENTAS
 # =========================
@@ -372,11 +380,19 @@ def pantalla_cuentas():
 
     st.subheader("📄 Cuentas")
 
-    col_ref, _ = st.columns([1, 4])
+    col_ref, col_ord = st.columns([1, 1])
     with col_ref:
         if st.button("🔄 Refrescar tabla", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
+
+    with col_ord:
+        if st.button("🔤 Ordenar por plataforma", use_container_width=True):
+            sort_cuentas_por_plataforma()
+            st.success("✅ Cuentas ordenadas por plataforma (A → Z).")
+            st.cache_data.clear()
+            st.rerun()
+
 
     df_noidx = df.drop(columns=["_sheet_row"]).copy()
 
@@ -433,6 +449,7 @@ def pantalla_cuentas():
         "Fecha de fin",
         "Costo",
         "Proveedor",
+        "Notas",
     ]
     df_vista = df_noidx[columnas_visibles].copy()
 
