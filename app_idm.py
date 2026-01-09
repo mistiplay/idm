@@ -223,9 +223,37 @@ def update_single_cells(ws_title: str, sheet_row: int, col_indices: list[int], v
         ws.update(a1, [[val]])
 
 # NUEVAS FUNCIONES: agregar y eliminar filas
-def append_ingreso(ws_title: str, valores: list[str]):
+def append_ingreso(ws_title: str, valores_dict: dict):
+    """
+    valores_dict: diccionario con SOLO las columnas editables:
+      {
+        "Plataforma": ...,
+        "Suscripcion": ...,
+        "Correo": ...,
+        "Proveedor": ...,
+        "Fecha del pedido": "dd/mm/aaaa",
+        "Costo": "123.45",
+      }
+    """
     ws = open_ws(ws_title)
-    ws.append_row(valores, value_input_option="USER_ENTERED")  # agrega al final [web:326]
+
+    # 1) Agregamos una fila vacía al final (sin datos)
+    ws.append_row([], value_input_option="USER_ENTERED")
+
+    # 2) Calculamos el número real de la última fila con contenido
+    data = ws.get_all_values()
+    last_row = len(data)  # aquí está la nueva fila
+
+    # 3) Escribimos SOLO las columnas editables en esa fila
+    #    (no tocamos Logo, Estado, Fecha de fin, etc., para no borrar fórmulas)
+    headers = data[0]  # encabezados de la fila 1
+    for col_name, value in valores_dict.items():
+        if col_name in headers:
+            col_index = headers.index(col_name) + 1  # índice 1-based
+            col_letter = col_to_letter(col_index)
+            a1 = f"{col_letter}{last_row}"
+            ws.update(a1, [[value]])
+
 
 def delete_ingreso(ws_title: str, sheet_row: int):
     ws = open_ws(ws_title)
@@ -376,29 +404,20 @@ def pantalla_cuentas():
         submitted = st.form_submit_button("💾 Guardar nuevo ingreso")
 
     if submitted:
-        cols = [c for c in df.columns if c != "_sheet_row"]
-        nueva_fila = []
-        for c in cols:
-            if c == "Plataforma":
-                nueva_fila.append(plataforma_new)
-            elif c == "Suscripcion":
-                nueva_fila.append(suscripcion_new)
-            elif c == "Correo":
-                nueva_fila.append(correo_new)
-            elif c == "Proveedor":
-                nueva_fila.append(proveedor_new)
-            elif c == "Fecha del pedido":
-                nueva_fila.append(fecha_pedido_new.strftime("%d/%m/%Y"))
-            elif c == "Costo":
-                nueva_fila.append(str(costo_new))
-            else:
-                nueva_fila.append("")
-        append_ingreso("Cuentas", nueva_fila)
+        valores_dict = {
+            "Plataforma": plataforma_new,
+            "Suscripcion": suscripcion_new,
+            "Correo": correo_new,
+            "Proveedor": proveedor_new,
+            "Fecha del pedido": fecha_pedido_new.strftime("%d/%m/%Y"),
+            "Costo": str(costo_new),
+        }
+
+        append_ingreso("Cuentas", valores_dict)
         st.success("✅ Nuevo ingreso agregado.")
         st.cache_data.clear()
         st.rerun()
 
-    st.markdown("---")
 
     # ---------- TABLA PRINCIPAL (solo una columna Logo) ----------
     columnas_visibles = [
