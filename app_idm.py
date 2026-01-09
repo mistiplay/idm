@@ -487,16 +487,24 @@ def pantalla_cuentas():
         return
 
     st.subheader("📄 Cuentas")
-    st.dataframe(df.drop(columns=["_sheet_row"]), use_container_width=True)
 
-    st.markdown("### ✏️ Editar fila")
-    for idx, row in df.iterrows():
-        col1, col2 = st.columns([4, 1])
-        with col1:
-            st.write(f"Fila {int(row['_sheet_row'])} · {row.get('Plataforma','')} · {row.get('Correo','')}")
-        with col2:
+    # Dos columnas: izquierda tabla, derecha botones de editar
+    col_tabla, col_botones = st.columns([4, 1])
+
+    with col_tabla:
+        st.dataframe(df.drop(columns=["_sheet_row"]), use_container_width=True)
+
+    with col_botones:
+        st.markdown("**Acciones**")
+        for idx, row in df.iterrows():
+            etiqueta = f"Fila {int(row['_sheet_row'])}"
+            plataforma = str(row.get("Plataforma", ""))
+            correo = str(row.get("Correo", ""))
+            st.markdown(f"{etiqueta}<br/><span style='font-size:11px; color:#bbb;'>{plataforma} · {correo}</span>", unsafe_allow_html=True)
             if st.button("✏️ Editar", key=f"edit_{idx}", use_container_width=True):
                 dialog_editar_cuenta(idx, df)
+            st.markdown("---")
+
 
 # =============== MAIN: solo Cuentas por ahora ===============
 tab_cuentas, = st.tabs(["Cuentas"])
