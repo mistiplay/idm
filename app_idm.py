@@ -619,15 +619,48 @@ def pantalla_datos():
     df_noidx = df.drop(columns=["_sheet_row"]).copy()
 
     # ---------- FORMULARIO NUEVO DATO ----------
+        # ---------- NUEVO DATO (Correo dependiente de Cuentas) ----------
     st.markdown("### ➕ Nuevo dato")
 
+    # 1) Selectores fuera del form (para que Correo se actualice al instante)
+    colA, colB, colC = st.columns(3)
+
+    with colA:
+        plataformas_exist = sorted({x for x in df_noidx.get("Plataforma", pd.Series()).unique() if str(x).strip()})
+        plataforma_new = st.selectbox(
+            "Plataforma",
+            plataformas_exist if plataformas_exist else [""],
+            key="datos_new_plataforma",
+        )
+
+    with colB:
+        proved_exist = sorted({x for x in df_noidx.get("Proveedor", pd.Series()).unique() if str(x).strip()})
+        proveedor_new = st.selectbox(
+            "Proveedor",
+            proved_exist if proved_exist else [""],
+            key="datos_new_proveedor",
+        )
+
+    # 2) Construir correos desde la hoja "Cuentas"
+    df_cuentas = read_ws_df("Cuentas")
+    correos_ops = []
+    if not df_cuentas.empty:
+        df_c = df_cuentas.drop(columns=["_sheet_row"], errors="ignore").copy()
+        if all(c in df_c.columns for c in ["Plataforma", "Proveedor", "Correo"]):
+            mask = (df_c["Plataforma"] == plataforma_new) & (df_c["Proveedor"] == proveedor_new)
+            correos_ops = sorted({x for x in df_c.loc[mask, "Correo"].unique() if str(x).strip()})
+
+    with colC:
+        if correos_ops:
+            correo_new = st.selectbox("Correo", correos_ops, key="datos_new_correo")
+        else:
+            correo_new = st.text_input("Correo (sin opciones)", key="datos_new_correo_txt")
+
+    # 3) El resto de campos sí van dentro del form + botón submit
     with st.form("form_nuevo_dato"):
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            plataformas_exist = sorted({x for x in df_noidx.get("Plataforma", pd.Series()).unique() if str(x).strip()})
-            plataforma_new = st.selectbox("Plataforma", plataformas_exist if plataformas_exist else [""])
-
             suscs_exist = sorted({x for x in df_noidx.get("Suscripcion", pd.Series()).unique() if str(x).strip()})
             suscripcion_new = st.selectbox("Suscripción", suscs_exist if suscs_exist else [""])
 
@@ -645,14 +678,7 @@ def pantalla_datos():
             activ_new = st.selectbox("Activación", activ_exist if activ_exist else [""])
 
         with col3:
-            proved_exist = sorted({x for x in df_noidx.get("Proveedor", pd.Series()).unique() if str(x).strip()})
-            proveedor_new = st.selectbox("Proveedor", proved_exist if proved_exist else [""])
-
             fecha_pedido_new = st.date_input("Fecha del pedido", value=date.today())
-
-            # Correo: por ahora es texto (sin hoja auxiliar "Correos")
-            correo_new = st.text_input("Correo")
-
             usuario_new = st.text_input("Usuario")
             pin_new = st.text_input("PIN")
             costo_new = st.number_input("Costo", min_value=0.0, step=1.0)
@@ -662,6 +688,8 @@ def pantalla_datos():
     if submitted:
         valores_dict = {
             "Plataforma": plataforma_new,
+            "Proveedor": proveedor_new,
+            "Correo": correo_new,
             "Cliente": cliente_new,
             "Notas": notas_new,
             "Suscripcion": suscripcion_new,
@@ -669,8 +697,6 @@ def pantalla_datos():
             "Pago": pago_new,
             "Fecha del pedido": fecha_pedido_new.strftime("%d/%m/%Y"),
             "Activación": activ_new,
-            "Proveedor": proveedor_new,
-            "Correo": correo_new,
             "Usuario": usuario_new,
             "PIN": pin_new,
             "Costo": str(costo_new),
