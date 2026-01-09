@@ -314,9 +314,10 @@ def pantalla_cuentas():
     st.data_editor(df_view, use_container_width=True, disabled=True)
 
     opciones = [
-        f"{i} · {r.get('Plataforma','')} · {r.get('Correo','')}"
+        f"{i+1} · {r.get('Plataforma','')} · {r.get('Correo','')}"
         for i, (_, r) in enumerate(df.iterrows())
     ]
+
     mapa_idx = {opt: i for i, opt in enumerate(opciones)}
 
     st.markdown("#### ✏️ Editar fila")
