@@ -222,50 +222,56 @@ def update_single_cells(ws_title: str, sheet_row: int, col_indices: list[int], v
         a1 = f"{col_letter}{sheet_row}"
         ws.update(a1, [[val]])
 
-# NUEVAS FUNCIONES: agregar y eliminar filas
 def append_ingreso(ws_title: str, valores_dict: dict):
     """
-    valores_dict: diccionario con SOLO las columnas editables:
-      {
-        "Plataforma": ...,
-        "Suscripcion": ...,
-        "Correo": ...,
-        "Proveedor": ...,
-        "Fecha del pedido": "dd/mm/aaaa",
-        "Costo": "123.45",
-      }
+    Para hoja Cuentas: solo escribe columnas editables
+    (Plataforma, Suscripcion, Correo, Proveedor, Fecha del pedido, Costo).
     """
     ws = open_ws(ws_title)
 
-    # 1) Agregamos una fila vacía al final (sin datos)
     ws.append_row([], value_input_option="USER_ENTERED")
 
-    # 2) Calculamos el número real de la última fila con contenido
     data = ws.get_all_values()
-    last_row = len(data)  # aquí está la nueva fila
+    last_row = len(data)
 
-    # 3) Escribimos SOLO las columnas editables en esa fila
-    #    (no tocamos Logo, Estado, Fecha de fin, etc., para no borrar fórmulas)
-    headers = data[0]  # encabezados de la fila 1
+    headers = data[0]
     for col_name, value in valores_dict.items():
         if col_name in headers:
-            col_index = headers.index(col_name) + 1  # índice 1-based
+            col_index = headers.index(col_name) + 1
             col_letter = col_to_letter(col_index)
             a1 = f"{col_letter}{last_row}"
             ws.update(a1, [[value]])
 
+def append_dato(ws_title: str, valores_dict: dict):
+    """
+    Para hoja Datos: solo escribe columnas editables
+    (las del formulario) y no toca columnas con fórmula ni Logo.
+    """
+    ws = open_ws(ws_title)
+
+    ws.append_row([], value_input_option="USER_ENTERED")
+
+    data = ws.get_all_values()
+    last_row = len(data)
+
+    headers = data[0]
+    for col_name, value in valores_dict.items():
+        if col_name in headers:
+            col_index = headers.index(col_name) + 1
+            col_letter = col_to_letter(col_index)
+            a1 = f"{col_letter}{last_row}"
+            ws.update(a1, [[value]])
 
 def delete_ingreso(ws_title: str, sheet_row: int):
     ws = open_ws(ws_title)
-    ws.delete_rows(sheet_row)  # elimina fila completa [web:330]
+    ws.delete_rows(sheet_row)
 
 def sort_cuentas_por_plataforma():
     ws = open_ws("Cuentas")
     headers = ws.row_values(1)
     if "Plataforma" in headers:
-        col_index = headers.index("Plataforma") + 1  # 1-based
+        col_index = headers.index("Plataforma") + 1
         ws.sort((col_index, "asc"))
-
 
 # =========================
 # 6) CONFIG CAMPOS CUENTAS
@@ -295,7 +301,6 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
         val = row_data.get(h, "")
 
         if h in PROTECTED_CUENTAS:
-            # Solo se muestra deshabilitado
             st.text_input(h, value=str(val), disabled=True)
             continue
 
@@ -393,7 +398,6 @@ def pantalla_cuentas():
             st.cache_data.clear()
             st.rerun()
 
-
     df_noidx = df.drop(columns=["_sheet_row"]).copy()
 
     # ---------- FORMULARIO NUEVO INGRESO ----------
@@ -434,8 +438,9 @@ def pantalla_cuentas():
         st.cache_data.clear()
         st.rerun()
 
+    st.markdown("---")
 
-    # ---------- TABLA PRINCIPAL (solo una columna Logo) ----------
+    # ---------- TABLA PRINCIPAL ----------
     columnas_visibles = [
         "Plataforma",
         "LogoURL",          # se mostrará como "Logo"
@@ -505,7 +510,7 @@ def pantalla_cuentas():
 
     with col_sel_del:
         seleccion_del = st.selectbox(
-            "Selecciona la fila a eliminar (número en Google Sheets):",
+            "Selecciona la fila a eliminar (Cuentas):",
             opciones_del,
             index=0 if opciones_del else None,
             key="cuentas_fila_del",
@@ -515,13 +520,177 @@ def pantalla_cuentas():
         if st.button("🗑️ Eliminar", use_container_width=True):
             sheet_row_del = mapa_row_del[seleccion_del]
             delete_ingreso("Cuentas", sheet_row_del)
-            st.success(f"✅ Ingreso eliminado (fila {sheet_row_del} en Sheets).")
+            st.success(f"✅ Ingreso eliminado (fila {sheet_row_del} en 'Cuentas').")
             st.cache_data.clear()
             st.rerun()
 
 # =========================
-# 8) TABS
+# 8) PANTALLA DATOS
 # =========================
-tab_cuentas, = st.tabs(["Cuentas"])
+def pantalla_datos():
+    df = read_ws_df("Datos")
+    if df.empty:
+        st.warning("La hoja 'Datos' está vacía.")
+        return
+
+    st.subheader("📄 Datos")
+
+    col_ref, col_ord = st.columns([1, 1])
+    with col_ref:
+        if st.button("🔄 Refrescar tabla (Datos)", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
+    def sort_datos_por_plataforma():
+        ws = open_ws("Datos")
+        headers = ws.row_values(1)
+        if "Plataforma" in headers:
+            col_index = headers.index("Plataforma") + 1
+            ws.sort((col_index, "asc"))
+
+    with col_ord:
+        if st.button("🔤 Ordenar Datos por plataforma", use_container_width=True):
+            sort_datos_por_plataforma()
+            st.success("✅ Datos ordenados por plataforma (A → Z).")
+            st.cache_data.clear()
+            st.rerun()
+
+    df_noidx = df.drop(columns=["_sheet_row"]).copy()
+
+    # ---------- FORMULARIO NUEVO DATO ----------
+    st.markdown("### ➕ Nuevo dato")
+
+    with st.form("form_nuevo_dato"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            plataformas_exist = sorted({x for x in df_noidx["Plataforma"].unique() if str(x).strip()})
+            plataforma_new = st.selectbox("Plataforma", plataformas_exist)
+
+            suscs_exist = sorted({x for x in df_noidx["Suscripcion"].unique() if str(x).strip()})
+            suscripcion_new = st.selectbox("Suscripción", suscs_exist)
+
+            combo_exist = sorted({x for x in df_noidx["Combo"].unique() if str(x).strip()})
+            combo_new = st.selectbox("Combo", combo_exist)
+
+        with col2:
+            cliente_new = st.text_input("Cliente")
+            notas_new = st.text_area("Notas", height=80)
+
+            pago_exist = sorted({x for x in df_noidx["Pago"].unique() if str(x).strip()})
+            pago_new = st.selectbox("Pago", pago_exist)
+
+            activ_exist = sorted({x for x in df_noidx["Activación"].unique() if str(x).strip()})
+            activ_new = st.selectbox("Activación", activ_exist)
+
+        with col3:
+            proved_exist = sorted({x for x in df_noidx["Proveedor"].unique() if str(x).strip()})
+            proveedor_new = st.selectbox("Proveedor", proved_exist)
+
+            fecha_pedido_new = st.date_input("Fecha del pedido")
+
+            correo_new = st.text_input("Correo")
+
+            usuario_new = st.text_input("Usuario")
+            pin_new = st.text_input("PIN")
+            costo_new = st.number_input("Costo", min_value=0.0, step=1.0)
+
+        submitted = st.form_submit_button("💾 Guardar nuevo dato")
+
+    if submitted:
+        valores_dict = {
+            "Plataforma": plataforma_new,
+            "Cliente": cliente_new,
+            "Notas": notas_new,
+            "Suscripcion": suscripcion_new,
+            "Combo": combo_new,
+            "Pago": pago_new,
+            "Fecha del pedido": fecha_pedido_new.strftime("%d/%m/%Y"),
+            "Activación": activ_new,
+            "Proveedor": proveedor_new,
+            "Correo": correo_new,
+            "Usuario": usuario_new,
+            "PIN": pin_new,
+            "Costo": str(costo_new),
+        }
+
+        append_dato("Datos", valores_dict)
+        st.success("✅ Nuevo dato agregado.")
+        st.cache_data.clear()
+        st.rerun()
+
+    st.markdown("---")
+
+    # ---------- TABLA DE DATOS ----------
+    columnas_visibles = [
+        "Plataforma",
+        "LogoURL",
+        "Cliente",
+        "Notas",
+        "Suscripcion",
+        "Combo",
+        "Pago",
+        "Estado",
+        "Dias Restantes",
+        "Fecha del pedido",
+        "Fecha de fin",
+        "Activación",
+        "Proveedor",
+        "Correo",
+        "Usuario",
+        "PIN",
+        "Costo",
+        "Info Cliente",
+    ]
+
+    df_vista = df_noidx[columnas_visibles].copy()
+
+    st.data_editor(
+        df_vista,
+        use_container_width=True,
+        disabled=True,
+        column_config={
+            "LogoURL": st.column_config.ImageColumn("Logo", width="small"),
+        },
+    )
+
+    # ---------- ELIMINAR DATO ----------
+    st.markdown("### 🗑️ Eliminar dato")
+
+    opciones_del = [
+        f"{int(r['_sheet_row'])} · {r.get('Plataforma','')} · {r.get('Cliente','')}"
+        for _, r in df.iterrows()
+    ]
+    mapa_row_del = {
+        opt: int(r["_sheet_row"])
+        for opt, (_, r) in zip(opciones_del, df.iterrows())
+    }
+
+    col_sel_del, col_btn_del = st.columns([3, 1])
+
+    with col_sel_del:
+        seleccion_del = st.selectbox(
+            "Selecciona la fila a eliminar (Datos):",
+            opciones_del,
+            index=0 if opciones_del else None,
+            key="datos_fila_del",
+        )
+
+    with col_btn_del:
+        if st.button("🗑️ Eliminar dato", use_container_width=True):
+            sheet_row_del = mapa_row_del[seleccion_del]
+            delete_ingreso("Datos", sheet_row_del)
+            st.success(f"✅ Dato eliminado (fila {sheet_row_del} en 'Datos').")
+            st.cache_data.clear()
+            st.rerun()
+
+# =========================
+# 9) TABS
+# =========================
+tab_cuentas, tab_datos = st.tabs(["Cuentas", "Datos"])
+
 with tab_cuentas:
     pantalla_cuentas()
+
+with tab_datos:
+    pantalla_datos()
