@@ -1,4 +1,3 @@
-import time
 import re
 from datetime import date, timedelta
 
@@ -20,7 +19,7 @@ st.markdown("""
 SHEET_URL = st.secrets["general"]["sheet_url"]
 
 # =======================
-# FUNCIONES GOOGLE SHEETS
+# GOOGLE SHEETS
 # =======================
 @st.cache_resource
 def gs_client():
@@ -39,20 +38,28 @@ def open_ws(title: str):
     return ss.worksheet(title)
 
 def safe_strip_columns(df: pd.DataFrame) -> pd.DataFrame:
-    # Convierte cualquier nombre de columna a texto y quita espacios
     df = df.copy()
     df.columns = pd.Index([str(c).strip() for c in df.columns])
     return df
 
-@st.cache_data(ttl=120)  # cache 2 minutos para evitar 429 [web:155]
+@st.cache_data(ttl=120)
 def read_worksheet_as_df(title: str) -> pd.DataFrame:
     ws = open_ws(title)
-    data = ws.get_all_records()
-    df = pd.DataFrame(data)
-    return safe_strip_columns(df)
+
+    # Lee TODO (incluye encabezados aunque no haya datos)
+    values = ws.get_all_values()  # [web:176]
+    if not values:
+        return pd.DataFrame()
+
+    headers = [h.strip() for h in values[0]]
+    rows = values[1:]
+
+    df = pd.DataFrame(rows, columns=headers)
+    df = safe_strip_columns(df)
+    return df
 
 # =======================
-# FUNCIONES DE NEGOCIO
+# REGLAS
 # =======================
 def parse_meses(s) -> int:
     if not s:
@@ -64,7 +71,6 @@ def to_date(x):
     if x in (None, "", "N/A"):
         return None
     try:
-        # Si tus fechas están como "30/05/2025" o similares
         return pd.to_datetime(x, dayfirst=True).date()
     except:
         return None
@@ -86,31 +92,21 @@ st.markdown("<h2 style='text-align:center; color:#00C6FF;'>📺 CUENTAS</h2>", u
 try:
     df = read_worksheet_as_df("Cuentas")
     df_plat = read_worksheet_as_df("Buscarv")
-
-except gspread.exceptions.APIError as e:
-    # Si es 429, normalmente se arregla esperando un rato [web:145]
-    st.error("Google bloqueó por muchas lecturas (Error 429). Espera 1–2 minutos y presiona Reboot.")
-    st.exception(e)
-    st.stop()
-
 except Exception as e:
-    st.error("Error cargando Google Sheets. Revisa que las hojas existan y que tengan encabezados en la fila 1.")
+    st.error("Error cargando Google Sheets. Revisa el nombre de las pestañas: Cuentas y Buscarv.")
     st.exception(e)
     st.stop()
 
-# Mostrar columnas para que confirmes (modo fácil)
 with st.expander("Ver columnas detectadas (diagnóstico)"):
-    st.write("Columnas en Cuentas:", df.columns.tolist())  # [web:137]
-    st.write("Columnas en Buscarv:", df_plat.columns.tolist())  # [web:137]
+    st.write("Columnas en Cuentas:", df.columns.tolist())
+    st.write("Columnas en Buscarv:", df_plat.columns.tolist())
 
-# Validación mínima (para evitar errores raros)
+# Si sigue vacía, es porque no hay encabezados en fila 1 o la pestaña está en blanco
 if df.empty:
-    st.warning("La hoja 'Cuentas' está vacía o no tiene datos aún.")
+    st.warning("La hoja 'Cuentas' está vacía. Agrega encabezados en la fila 1 y al menos una fila de datos.")
     st.stop()
 
-# IMPORTANTE: Estas columnas deben existir tal cual en ambas hojas:
-# - En Cuentas: 'Plataforma'
-# - En Buscarv: 'Plataforma', 'logo_url', 'max_perfiles'
+# Validar columnas necesarias
 required_cuentas = ["Plataforma", "Suscripcion", "Fecha del pedido"]
 required_buscarv = ["Plataforma", "logo_url", "max_perfiles"]
 
@@ -118,21 +114,21 @@ missing_cuentas = [c for c in required_cuentas if c not in df.columns]
 missing_buscarv = [c for c in required_buscarv if c not in df_plat.columns]
 
 if missing_cuentas:
-    st.error(f"En la hoja 'Cuentas' faltan estas columnas: {missing_cuentas}")
+    st.error(f"En 'Cuentas' faltan estas columnas: {missing_cuentas}")
     st.stop()
 
 if missing_buscarv:
-    st.error(f"En la hoja 'Buscarv' faltan estas columnas: {missing_buscarv}")
+    st.error(f"En 'Buscarv' faltan estas columnas: {missing_buscarv}")
     st.stop()
 
-# Merge para traer logo_url y max_perfiles
+# Merge para traer logo y perfiles máximos
 df = df.merge(
     df_plat[["Plataforma", "logo_url", "max_perfiles"]],
     on="Plataforma",
     how="left"
 )
 
-# Cálculos de fechas/días/estado
+# Calcular fechas/días/estado
 hoy = date.today()
 df["meses_num"] = df["Suscripcion"].apply(parse_meses)
 df["Fecha del pedido_dt"] = df["Fecha del pedido"].apply(to_date)
@@ -154,11 +150,9 @@ df["Perfiles Activos"] = pd.to_numeric(df["Perfiles Activos"], errors="coerce").
 df["max_perfiles"] = pd.to_numeric(df["max_perfiles"], errors="coerce")
 df["Perfiles Disponibles"] = (df["max_perfiles"] - df["Perfiles Activos"]).clip(lower=0)
 
-# Mostrar tabla
+# Mostrar
 st.dataframe(
     df,
     use_container_width=True,
-    column_config={
-        "logo_url": st.column_config.ImageColumn("Logo"),
-    }
+    column_config={"logo_url": st.column_config.ImageColumn("Logo")}
 )
