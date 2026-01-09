@@ -527,6 +527,94 @@ def pantalla_cuentas():
 # =========================
 # 8) PANTALLA DATOS
 # =========================
+@st.dialog("Editar dato", width="large")
+def dialog_editar_dato(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame):
+    st.write(f"Fila en Google Sheets (Datos): **{sheet_row}**")
+
+    # Columnas que NO se deben tocar
+    protected = {
+        "Logo",
+        "LogoURL",
+        "Estado",
+        "Dias Restantes",
+        "Fecha de fin",
+        "Contraseña",
+        "Info Cliente",
+    }
+
+    list_columns = {
+        "Plataforma",
+        "Suscripcion",
+        "Combo",
+        "Pago",
+        "Activación",
+        "Proveedor",
+    }
+
+    number_columns = {"Costo"}
+    date_columns = {"Fecha del pedido"}
+
+    new_vals = {}
+    headers = list(row_data.keys())
+
+    for h in headers:
+        val = row_data.get(h, "")
+
+        if h in protected:
+            st.text_input(h, value=str(val), disabled=True)
+            continue
+
+        if h in date_columns:
+            s = str(val).strip()
+            parsed = None
+            if s:
+                try:
+                    parsed = pd.to_datetime(s, dayfirst=True, errors="raise").date()
+                except Exception:
+                    parsed = None
+            new_date = st.date_input(h, value=parsed, key=f"date_datos_{h}_{sheet_row}")
+            new_vals[h] = new_date.strftime("%d/%m/%Y") if new_date else ""
+            continue
+
+        if h in number_columns:
+            s = str(val).strip().replace(",", ".")
+            try:
+                num_val = float(s) if s else 0.0
+            except Exception:
+                num_val = 0.0
+            new_num = st.number_input(h, value=num_val, step=1.0, key=f"num_datos_{h}_{sheet_row}")
+            new_vals[h] = new_num
+            continue
+
+        if h in list_columns:
+            opciones = sorted({x for x in df_noidx[h].unique() if str(x).strip()})
+            if val and val not in opciones:
+                opciones.append(val)
+            idx_default = opciones.index(val) if val in opciones and opciones else 0
+            new_sel = st.selectbox(h, opciones, index=idx_default, key=f"sel_datos_{h}_{sheet_row}")
+            new_vals[h] = new_sel
+            continue
+
+        new_text = st.text_input(h, value=str(val), key=f"txt_datos_{h}_{sheet_row}")
+        new_vals[h] = new_text
+
+    if st.button("💾 Guardar cambios (Datos)", use_container_width=True, key=f"save_datos_{sheet_row}"):
+        df_cols = [c for c in df_noidx.columns]
+        col_indices = []
+        values = []
+        for h in df_cols:
+            if h in protected:
+                continue
+            if h in new_vals:
+                idx = df_cols.index(h)
+                col_indices.append(idx)
+                values.append(new_vals[h])
+        update_single_cells("Datos", sheet_row, col_indices, values)
+        st.success("✅ Cambios guardados en 'Datos'.")
+        st.cache_data.clear()
+        time.sleep(1)
+        st.rerun()
+
 def pantalla_datos():
     df = read_ws_df("Datos")
     if df.empty:
@@ -653,6 +741,32 @@ def pantalla_datos():
             "LogoURL": st.column_config.ImageColumn("Logo", width="small"),
         },
     )
+        # ---------- EDITAR DATO ----------
+    st.markdown("#### ✏️ Editar dato")
+
+    opciones_edit = [
+        f"{i} · {r.get('Plataforma','')} · {r.get('Cliente','')}"
+        for i, (_, r) in enumerate(df_noidx.iterrows())
+    ]
+    mapa_idx_edit = {opt: i for i, opt in enumerate(opciones_edit)}
+
+    col_sel_edit, col_btn_edit = st.columns([3, 1])
+
+    with col_sel_edit:
+        seleccion_edit = st.selectbox(
+            "Selecciona la fila a editar (Datos):",
+            opciones_edit,
+            index=0 if opciones_edit else None,
+            key="datos_fila_sel",
+        )
+
+    with col_btn_edit:
+        if st.button("✏️ Editar dato", use_container_width=True):
+            idx = mapa_idx_edit[seleccion_edit]
+            row = df.iloc[idx]
+            sheet_row = int(row["_sheet_row"])
+            row_data = row.drop(labels=["_sheet_row"]).to_dict()
+            dialog_editar_dato(sheet_row, row_data, df_noidx)
 
     # ---------- ELIMINAR DATO ----------
     st.markdown("### 🗑️ Eliminar dato")
