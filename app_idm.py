@@ -321,7 +321,7 @@ def dialog_editar_cuenta(sheet_row: int, row_data: dict, df_noidx: pd.DataFrame)
     new_vals = {}
 
     for h in headers:
-    val = row_data.get(h, "")
+        val = row_data.get(h, "")
 
     if h in PROTECTED_CUENTAS:
         st.text_input(h, value=str(val), disabled=True)
